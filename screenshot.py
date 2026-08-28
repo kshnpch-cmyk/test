@@ -19,7 +19,7 @@ driver.find_element(By.ID, 'userId').send_keys('1220503 ')
 driver.find_element(By.ID, 'userPw').send_keys('chanho0801!')
 
 # 2. 로그인 버튼 클릭 (실제 로그인 버튼의 클래스나 ID로 변경 필요)
-driver.find_element(By.CLASS_NAME, 'btn_login').click()
+driver.find_element(By.CLASS_NAME, 'login_submit').click()
 
 time.sleep(5) # 로그인 완료될 때까지 5초 대기
 
