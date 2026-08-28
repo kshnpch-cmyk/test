@@ -9,6 +9,8 @@ options.add_argument('--no-sandbox')
 options.add_argument('--disable-dev-shm-usage')
 
 driver = webdriver.Chrome(options=options)
+driver.set_window_size(1920, 1080) 
+
 driver.get('https://gw.theborn.co.kr/gw/uat/uia/egovLoginUsr.do')
 
 time.sleep(2) # 페이지 로딩 대기
