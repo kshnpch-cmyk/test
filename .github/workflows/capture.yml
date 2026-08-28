@@ -1,16 +1,21 @@
 name: Auto Capture
 
 on:
-  workflow_dispatch: # 버튼을 눌러서 수동 실행할 수 있게 함
+  workflow_dispatch:
+
+# 봇이 캡처 이미지를 저장할 수 있도록 '쓰기 권한'을 명시적으로 부여 (128 오류 해결)
+permissions:
+  contents: write
 
 jobs:
   capture:
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v3
+      # 구버전 경고를 해결하기 위해 v4, v5 최신 버전으로 변경
+      - uses: actions/checkout@v4
       
       - name: Python 설정
-        uses: actions/setup-python@v4
+        uses: actions/setup-python@v5
         with:
           python-version: '3.10'
           
