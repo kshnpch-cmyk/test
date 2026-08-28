@@ -21,6 +21,11 @@ jobs:
           
       - name: Selenium 설치
         run: pip install selenium
+
+        - name: 한글 폰트(나눔고딕) 설치
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y fonts-nanum
         
       - name: 캡처 파이썬 파일 실행
         run: python screenshot.py
