@@ -12,16 +12,10 @@ def test_connection():
         
         token_info = json.loads(token_secret)
         
-        # OAuth Playground에서 발급받았을 때 포함된 실제 스코프와 완전히 일치시킵니다.
-        scopes = [
-            'https://www.googleapis.com/auth/drive',
-            'https://www.googleapis.com/auth/spreadsheets'
-        ]
+        # scopes=None으로 지정하여 저장된 토큰의 권한 범위를 그대로 인용합니다.
+        credentials = Credentials.from_authorized_user_info(token_info, scopes=None)
         
-        # Credentials 생성
-        credentials = Credentials.from_authorized_user_info(token_info, scopes=scopes)
-        
-        # 토큰 만료 시 자동 갱신
+        # 만료된 토큰 자동 갱신
         if credentials.expired and credentials.refresh_token:
             print("🔄 토큰 만료 감지, 갱신을 진행합니다...")
             credentials.refresh(Request())
