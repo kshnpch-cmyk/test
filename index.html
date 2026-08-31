@@ -4,7 +4,6 @@
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>가격 비교 대시보드</title>
-    <!-- 데이터 파싱 라이브러리 -->
     <script src="https://cdnjs.cloudflare.com/ajax/libs/PapaParse/5.3.2/papaparse.min.js"></script>
     <style>
         * { box-sizing: border-box; }
@@ -26,14 +25,42 @@
         .global-select { width: 100%; padding: 8px; border: 1px solid #ced4da; border-radius: 6px; font-size: 14px; outline: none; background-color: white; cursor: pointer; margin-top: auto; }
         .global-select:focus { border-color: #3b82f6; }
         .table-responsive { width: 100%; flex: 1; overflow: auto; border: 1px solid #e9ecef; border-radius: 4px; min-height: 0; }
-        table { width: 100%; border-collapse: separate; border-spacing: 0; font-size: 14px; }
-        th, td { padding: 12px 15px; border-bottom: 1px solid #eee; border-right: 1px solid #eee; text-align: left; white-space: normal; word-break: break-word; }
+        
+        /* 🔥 1. 기본 상태: 글자 수에 맞춰 최대 크기로 자동 렌더링 (뭉개짐 방지) */
+        table { 
+            width: max-content; 
+            min-width: 100%; 
+            border-collapse: separate; 
+            border-spacing: 0; 
+            font-size: 14px; 
+            table-layout: auto; 
+        }
+        th, td { 
+            padding: 12px 15px; 
+            border-bottom: 1px solid #eee; 
+            border-right: 1px solid #eee; 
+            text-align: left; 
+            white-space: nowrap; /* 줄바꿈 금지 -> 셀 크기를 내용물 길이에 맞춤 */
+        }
         td:last-child, th:last-child { border-right: none; }
         thead th { position: sticky !important; top: 0; background-color: #f1f3f5; font-weight: 600; color: #495057; vertical-align: top; z-index: 10; box-shadow: 0 2px 2px -1px rgba(0, 0, 0, 0.1); position: relative; }
         tr:hover td { background-color: #f8f9fa; }
+
+        /* 🔥 2. 크기 조절 시: 고정 레이아웃으로 변경하고 줄바꿈 허용 */
+        table.is-fixed {
+            table-layout: fixed;
+            width: auto;
+        }
+        table.is-fixed th, table.is-fixed td {
+            white-space: normal !important; /* 줄바꿈 허용 */
+            word-break: break-word !important; 
+            overflow: hidden;
+        }
+
         .filter-input { width: 100%; padding: 6px 8px; margin-top: 8px; border: 1px solid #ccc; border-radius: 4px; font-size: 13px; outline: none; }
         .filter-input:focus { border-color: #3b82f6; }
         .summary-badge { font-size: 14px; color: #6366f1; font-weight: normal; margin-left: 10px; }
+        
         .resizer { position: absolute; top: 0; right: 0; width: 6px; height: 100%; cursor: col-resize; user-select: none; background-color: transparent; z-index: 11; }
         .resizer:hover, .resizer.resizing { background-color: #3b82f6; }
         body.resizing-active { user-select: none; cursor: col-resize; }
@@ -87,7 +114,6 @@
     const sheetId = '1nA0ZtCztY6Qe8UR8-erB98_BIZDYUUjpIQYWNyuePWA';
     const csvUrl = `https://docs.google.com/spreadsheets/d/${sheetId}/export?format=csv&gid=0`;
 
-    // 단일 행 열 이름 (그대로 유지)
     const COL_OUR_PRICE = '자사가격';
     const COL_NET_PRICE = '최저가';
     const COL_DIFF = '차액';
@@ -97,7 +123,6 @@
     let allData = []; 
     let headers = [];
 
-    // 🔥 수정된 부분: header 옵션을 false로 변경하여 2차원 배열로 데이터를 읽어옵니다.
     Papa.parse(csvUrl, {
         download: true,
         header: false, 
@@ -105,7 +130,6 @@
             const rawData = results.data.filter(row => row.length > 0 && row.some(cell => cell !== ""));
             if(rawData.length < 2) return;
 
-            // 1. 1행(큰 제목)과 2행(소제목)을 분석하여 병합 헤더 복구
             const row1 = rawData[0];
             const row2 = rawData[1];
             let combinedHeaders = [];
@@ -114,23 +138,16 @@
             for(let i = 0; i < row1.length; i++) {
                 let top = row1[i] ? row1[i].trim() : "";
                 let bottom = row2[i] ? row2[i].trim() : "";
-
-                // 병합된 셀 처리: 1행 값이 있으면 업데이트, 없으면 이전 제목 유지
-                if(top !== "") {
-                    lastHeader = top;
-                }
+                if(top !== "") lastHeader = top;
 
                 if(bottom !== "" && bottom !== top) {
-                    // 2행에 소제목이 따로 있는 경우 (예: "판매 수량(재고단위)")
                     combinedHeaders.push(lastHeader ? `${lastHeader} ${bottom}` : bottom);
                 } else {
-                    // 소제목이 없거나 위아래가 같은 경우
                     combinedHeaders.push(lastHeader || bottom || `열_${i}`);
                 }
             }
             headers = combinedHeaders;
 
-            // 2. 3번째 행(인덱스 2)부터 실제 데이터 객체로 변환
             allData = [];
             for(let r = 2; r < rawData.length; r++) {
                 let obj = {};
@@ -196,14 +213,37 @@
         thead.appendChild(trHead);
     }
 
+    // 🔥 크기 조절 시작 전 현재 렌더링된 너비를 계산하여 픽스시키는 함수
+    function lockTableWidths() {
+        const table = document.getElementById('dataTable');
+        if (table.classList.contains('is-fixed')) return;
+
+        const ths = table.querySelectorAll('thead th');
+        // 브라우저가 자동 계산해준 최대 너비값 읽어오기
+        const widths = Array.from(ths).map(th => th.offsetWidth);
+        
+        // 각 열에 계산된 너비 고정값 부여
+        ths.forEach((th, i) => {
+            th.style.width = `${widths[i]}px`;
+            th.style.minWidth = `${widths[i]}px`;
+            th.style.maxWidth = `${widths[i]}px`;
+        });
+
+        // 표 전체 레이아웃을 고정(Fixed) 및 줄바꿈 허용 모드로 전환
+        table.classList.add('is-fixed');
+        table.style.width = widths.reduce((sum, w) => sum + w, 0) + 'px';
+    }
+
     function createResizableColumn(th, resizer) {
         let x = 0;
         let w = 0;
 
         const mouseDownHandler = function(e) {
+            // 처음 크기 조절 시 표의 전체 레이아웃 고정 처리
+            lockTableWidths();
+
             x = e.clientX; 
-            const styles = window.getComputedStyle(th);
-            w = parseInt(styles.width, 10); 
+            w = th.offsetWidth; // 현재 열의 실제 너비 저장
 
             document.addEventListener('mousemove', mouseMoveHandler);
             document.addEventListener('mouseup', mouseUpHandler);
@@ -216,9 +256,24 @@
             const dx = e.clientX - x; 
             const newWidth = Math.max(50, w + dx); 
             
-            th.style.width = `${newWidth}px`;
-            th.style.minWidth = `${newWidth}px`;
-            th.style.maxWidth = `${newWidth}px`;
+            // 크기가 변경되었을 때만 표와 열의 너비 업데이트
+            if (newWidth !== w) {
+                th.style.width = `${newWidth}px`;
+                th.style.minWidth = `${newWidth}px`;
+                th.style.maxWidth = `${newWidth}px`;
+                
+                // 표의 총 너비 재계산
+                const table = document.getElementById('dataTable');
+                const ths = table.querySelectorAll('thead th');
+                let totalWidth = 0;
+                ths.forEach(col => {
+                    totalWidth += parseInt(col.style.width, 10) || col.offsetWidth;
+                });
+                table.style.width = `${totalWidth}px`;
+                
+                x = e.clientX;
+                w = newWidth;
+            }
         };
 
         const mouseUpHandler = function() {
