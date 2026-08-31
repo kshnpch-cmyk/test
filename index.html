@@ -4,7 +4,9 @@
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>가격 비교 대시보드</title>
+    <!-- 데이터 파싱 및 엑셀 생성 라이브러리 -->
     <script src="https://cdnjs.cloudflare.com/ajax/libs/PapaParse/5.3.2/papaparse.min.js"></script>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/xlsx/0.18.5/xlsx.full.min.js"></script>
     <style>
         * { box-sizing: border-box; }
         body { font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif; background-color: #f8f9fa; margin: 0; padding: 20px; color: #333; height: 100vh; display: flex; flex-direction: column; overflow: hidden; }
@@ -52,10 +54,15 @@
         .filter-input:focus { border-color: #3b82f6; }
         .summary-badge { font-size: 14px; color: #6366f1; font-weight: normal; margin-left: 10px; }
         
-        /* 🔥 새로 추가된 저장 버튼 스타일 */
-        .btn-save { background-color: #ffffff; border: 1px solid #ced4da; padding: 6px 12px; border-radius: 6px; font-size: 13px; cursor: pointer; color: #495057; font-weight: 600; transition: background-color 0.2s; }
-        .btn-save:hover { background-color: #f1f3f5; }
+        /* 버튼 스타일 */
         .table-header-wrap { display: flex; justify-content: space-between; align-items: center; margin-bottom: 15px; }
+        .btn-group { display: flex; gap: 8px; }
+        .btn-save { background-color: #ffffff; border: 1px solid #ced4da; padding: 6px 12px; border-radius: 6px; font-size: 13px; cursor: pointer; color: #495057; font-weight: 600; transition: 0.2s; }
+        .btn-save:hover { background-color: #f1f3f5; }
+        
+        /* 🔥 새로 추가된 엑셀 저장 버튼 스타일 */
+        .btn-excel { background-color: #10b981; border: 1px solid #059669; padding: 6px 12px; border-radius: 6px; font-size: 13px; cursor: pointer; color: white; font-weight: 600; transition: 0.2s; }
+        .btn-excel:hover { background-color: #059669; }
 
         .resizer { position: absolute; top: 0; right: 0; width: 6px; height: 100%; cursor: col-resize; user-select: none; background-color: transparent; z-index: 11; }
         .resizer:hover, .resizer.resizing { background-color: #3b82f6; }
@@ -108,10 +115,13 @@
     </div>
 
     <div class="card table-card">
-        <!-- 🔥 제목과 버튼을 좌우로 배치하는 컨테이너 -->
         <div class="table-header-wrap">
             <h2 id="tableTitle" style="margin:0; font-size: 18px;">데이터 상세</h2>
-            <button class="btn-save" onclick="saveColumnWidths()">💾 셀 너비 저장</button>
+            <div class="btn-group">
+                <button class="btn-save" onclick="saveColumnWidths()">💾 셀 너비 저장</button>
+                <!-- 🔥 엑셀 저장 버튼 추가 -->
+                <button class="btn-excel" onclick="exportToExcel()">📥 엑셀 저장</button>
+            </div>
         </div>
         
         <div class="table-responsive">
@@ -135,6 +145,7 @@
 
     let allData = []; 
     let headers = [];
+    let currentFilteredData = []; // 🔥 현재 필터링된 데이터를 엑셀용으로 저장할 변수
 
     Papa.parse(csvUrl, {
         download: true,
@@ -209,28 +220,21 @@
             trHead.appendChild(th);
         });
         thead.appendChild(trHead);
-
-        // 🔥 헤더 렌더링 후, 저장된 너비가 있다면 불러와서 적용
         loadColumnWidths();
     }
 
-    // 🔥 셀 너비 저장 함수 (로컬 스토리지 활용)
     function saveColumnWidths() {
         const table = document.getElementById('dataTable');
         const ths = table.querySelectorAll('thead th');
         let widths = [];
-        
         ths.forEach(th => {
-            // 강제 조정된 width 값이 있으면 그 값을, 없으면 현재 표시된 offsetWidth를 저장
             let w = th.style.width ? parseInt(th.style.width, 10) : th.offsetWidth;
             widths.push(w);
         });
-        
         localStorage.setItem('my_dashboard_widths', JSON.stringify(widths));
-        alert('현재 셀 너비가 저장되었습니다. 다음에 이 PC/브라우저로 접속해도 크기가 유지됩니다.');
+        alert('현재 셀 너비가 저장되었습니다.');
     }
 
-    // 🔥 셀 너비 불러오기 함수
     function loadColumnWidths() {
         const saved = localStorage.getItem('my_dashboard_widths');
         if (saved) {
@@ -238,31 +242,22 @@
                 const widths = JSON.parse(saved);
                 const table = document.getElementById('dataTable');
                 const ths = table.querySelectorAll('thead th');
-                
-                // 열 갯수가 일치할 때만 적용 (시트에 새 열이 추가되었을 때 에러 방지)
                 if (ths.length === widths.length) {
                     ths.forEach((th, i) => {
-                        th.style.width = `${widths[i]}px`;
-                        th.style.minWidth = `${widths[i]}px`;
-                        th.style.maxWidth = `${widths[i]}px`;
+                        th.style.width = `${widths[i]}px`; th.style.minWidth = `${widths[i]}px`; th.style.maxWidth = `${widths[i]}px`;
                     });
-                    // 고정 모드로 즉시 전환
                     table.classList.add('is-fixed');
                     table.style.width = widths.reduce((sum, w) => sum + w, 0) + 'px';
                 }
-            } catch(e) {
-                console.error('너비 불러오기 실패:', e);
-            }
+            } catch(e) {}
         }
     }
 
     function lockTableWidths() {
         const table = document.getElementById('dataTable');
         if (table.classList.contains('is-fixed')) return;
-
         const ths = table.querySelectorAll('thead th');
         const widths = Array.from(ths).map(th => th.offsetWidth);
-        
         ths.forEach((th, i) => {
             th.style.width = `${widths[i]}px`; th.style.minWidth = `${widths[i]}px`; th.style.maxWidth = `${widths[i]}px`;
         });
@@ -272,17 +267,13 @@
 
     function createResizableColumn(th, resizer) {
         let x = 0; let w = 0;
-
         const mouseDownHandler = function(e) {
-            lockTableWidths();
-            x = e.clientX; w = th.offsetWidth; 
+            lockTableWidths(); x = e.clientX; w = th.offsetWidth; 
             document.addEventListener('mousemove', mouseMoveHandler); document.addEventListener('mouseup', mouseUpHandler);
             resizer.classList.add('resizing'); document.body.classList.add('resizing-active');
         };
-
         const mouseMoveHandler = function(e) {
             const dx = e.clientX - x; const newWidth = Math.max(50, w + dx); 
-            
             if (newWidth !== w) {
                 th.style.width = `${newWidth}px`; th.style.minWidth = `${newWidth}px`; th.style.maxWidth = `${newWidth}px`;
                 const table = document.getElementById('dataTable'); const ths = table.querySelectorAll('thead th');
@@ -291,12 +282,10 @@
                 x = e.clientX; w = newWidth;
             }
         };
-
         const mouseUpHandler = function() {
             document.removeEventListener('mousemove', mouseMoveHandler); document.removeEventListener('mouseup', mouseUpHandler);
             resizer.classList.remove('resizing'); document.body.classList.remove('resizing-active');
         };
-
         resizer.addEventListener('mousedown', mouseDownHandler);
     }
 
@@ -316,6 +305,8 @@
             }
             return true;
         });
+
+        currentFilteredData = filteredData; // 🔥 현재 필터링 상태 저장 (엑셀 다운로드용)
 
         updateSummary(filteredData);
         renderTableBody(filteredData);
@@ -354,7 +345,6 @@
 
     function renderTableBody(data) {
         const tbody = document.getElementById('tableBody'); tbody.innerHTML = ''; 
-
         data.forEach(row => {
             const tr = document.createElement('tr');
             tr.dataset.status = getRowStatus(row); 
@@ -376,6 +366,24 @@
             if (status === 'lose' && chkLose) tr.classList.add('highlight-lose');
             if (status === 'tie' && chkTie) tr.classList.add('highlight-tie');
         });
+    }
+
+    // 🔥 엑셀 다운로드 함수
+    function exportToExcel() {
+        if (currentFilteredData.length === 0) {
+            alert("내보낼 데이터가 없습니다.");
+            return;
+        }
+        
+        // 1. 워크시트 생성 (json 데이터를 엑셀 시트로 변환)
+        const ws = XLSX.utils.json_to_sheet(currentFilteredData, { header: headers });
+        
+        // 2. 워크북 생성 및 워크시트 추가
+        const wb = XLSX.utils.book_new();
+        XLSX.utils.book_append_sheet(wb, ws, "가격경쟁력_데이터");
+        
+        // 3. 파일로 저장
+        XLSX.writeFile(wb, "가격경쟁력_대시보드.xlsx");
     }
 </script>
 
