@@ -13,49 +13,50 @@
         .kpi-card { flex-shrink: 0; margin-bottom: 20px; }
         .table-card { flex: 1; display: flex; flex-direction: column; min-height: 0; margin-bottom: 0; }
         h1 { margin-top: 0; font-size: 24px; color: #111; margin-bottom: 20px; }
-        .summary-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(220px, 1fr)); gap: 16px; }
+        
+        /* 🔥 요약 카드 비율 수정 (품목 수는 좁게, 가격경쟁력은 넓게) */
+        .summary-grid { 
+            display: grid; 
+            grid-template-columns: 0.8fr 1.6fr 1.3fr 1.3fr; 
+            gap: 16px; 
+        }
+        @media (max-width: 1024px) {
+            .summary-grid { grid-template-columns: repeat(2, 1fr); }
+        }
+        @media (max-width: 768px) {
+            .summary-grid { grid-template-columns: 1fr; }
+        }
+
         .kpi-box { background-color: #f8f9fa; border: 1px solid #e9ecef; border-radius: 8px; padding: 16px; display: flex; flex-direction: column; }
         .kpi-title { font-size: 13px; color: #6c757d; font-weight: 600; margin-bottom: 10px; }
         .kpi-value { font-size: 24px; font-weight: bold; color: #212529; margin-bottom: 12px; }
         .kpi-list { font-size: 13px; color: #495057; line-height: 1.5; margin: 0; padding: 0; list-style: none; }
-        .kpi-list li { display: flex; justify-content: space-between; border-bottom: 1px dashed #dee2e6; padding: 4px 0; }
+        .kpi-list li { display: flex; justify-content: space-between; align-items: center; border-bottom: 1px dashed #dee2e6; padding: 4px 0; }
         .kpi-list li:last-child { border-bottom: none; }
-        .text-blue { color: #3b82f6; }
-        .text-red { color: #ef4444; }
+        
+        .text-blue { color: #2563eb; }
+        .text-red { color: #dc2626; }
+        .text-gray { color: #4b5563; }
+
         .global-select { width: 100%; padding: 8px; border: 1px solid #ced4da; border-radius: 6px; font-size: 14px; outline: none; background-color: white; cursor: pointer; margin-top: auto; }
         .global-select:focus { border-color: #3b82f6; }
         .table-responsive { width: 100%; flex: 1; overflow: auto; border: 1px solid #e9ecef; border-radius: 4px; min-height: 0; }
         
-        /* 🔥 1. 기본 상태: 글자 수에 맞춰 최대 크기로 자동 렌더링 (뭉개짐 방지) */
-        table { 
-            width: max-content; 
-            min-width: 100%; 
-            border-collapse: separate; 
-            border-spacing: 0; 
-            font-size: 14px; 
-            table-layout: auto; 
-        }
-        th, td { 
-            padding: 12px 15px; 
-            border-bottom: 1px solid #eee; 
-            border-right: 1px solid #eee; 
-            text-align: left; 
-            white-space: nowrap; /* 줄바꿈 금지 -> 셀 크기를 내용물 길이에 맞춤 */
-        }
+        table { width: max-content; min-width: 100%; border-collapse: separate; border-spacing: 0; font-size: 14px; table-layout: auto; }
+        th, td { padding: 12px 15px; border-bottom: 1px solid #eee; border-right: 1px solid #eee; text-align: left; white-space: nowrap; }
         td:last-child, th:last-child { border-right: none; }
         thead th { position: sticky !important; top: 0; background-color: #f1f3f5; font-weight: 600; color: #495057; vertical-align: top; z-index: 10; box-shadow: 0 2px 2px -1px rgba(0, 0, 0, 0.1); position: relative; }
-        tr:hover td { background-color: #f8f9fa; }
+        
+        table.is-fixed { table-layout: fixed; width: auto; }
+        table.is-fixed th, table.is-fixed td { white-space: normal !important; word-break: break-word !important; overflow: hidden; }
 
-        /* 🔥 2. 크기 조절 시: 고정 레이아웃으로 변경하고 줄바꿈 허용 */
-        table.is-fixed {
-            table-layout: fixed;
-            width: auto;
-        }
-        table.is-fixed th, table.is-fixed td {
-            white-space: normal !important; /* 줄바꿈 허용 */
-            word-break: break-word !important; 
-            overflow: hidden;
-        }
+        /* 🔥 표 체크박스 색상 강조 스타일 */
+        tr.highlight-win td { background-color: #eff6ff !important; color: #1d4ed8 !important; font-weight: 500; }
+        tr.highlight-lose td { background-color: #fef2f2 !important; color: #b91c1c !important; font-weight: 500; }
+        tr.highlight-tie td { background-color: #f3f4f6 !important; color: #4b5563 !important; font-weight: 500; }
+        tr:hover td { background-color: #f8f9fa; }
+        tr.highlight-win:hover td { background-color: #dbeafe !important; }
+        tr.highlight-lose:hover td { background-color: #fee2e2 !important; }
 
         .filter-input { width: 100%; padding: 6px 8px; margin-top: 8px; border: 1px solid #ccc; border-radius: 4px; font-size: 13px; outline: none; }
         .filter-input:focus { border-color: #3b82f6; }
@@ -64,6 +65,9 @@
         .resizer { position: absolute; top: 0; right: 0; width: 6px; height: 100%; cursor: col-resize; user-select: none; background-color: transparent; z-index: 11; }
         .resizer:hover, .resizer.resizing { background-color: #3b82f6; }
         body.resizing-active { user-select: none; cursor: col-resize; }
+        
+        .kpi-check-label { display: flex; align-items: center; cursor: pointer; font-size: 13px; margin: 0; }
+        .kpi-check-label input { margin-right: 6px; cursor: pointer; }
     </style>
 </head>
 <body>
@@ -77,11 +81,29 @@
                 <div class="kpi-value" id="kpiTotal">0건</div>
             </div>
             <div class="kpi-box">
-                <div class="kpi-title">💰 가격 경쟁력 (차액 기준)</div>
+                <div class="kpi-title">💰 가격 경쟁력 (차액 기준) - <span>체크 시 표 색상 강조</span></div>
                 <ul class="kpi-list">
-                    <li><span>우세 (차액 -)</span> <strong class="text-blue" id="kpiWin">0건</strong></li>
-                    <li><span>열세 (차액 +)</span> <strong class="text-red" id="kpiLose">0건</strong></li>
-                    <li><span>동일가격 (차액 0)</span> <strong id="kpiTie">0건</strong></li>
+                    <li>
+                        <label class="kpi-check-label">
+                            <input type="checkbox" id="chkWin" onchange="applyRowHighlights()"> 
+                            <span class="text-blue">우세 (차액 -)</span>
+                        </label>
+                        <strong class="text-blue" id="kpiWin">0건</strong>
+                    </li>
+                    <li>
+                        <label class="kpi-check-label">
+                            <input type="checkbox" id="chkLose" onchange="applyRowHighlights()"> 
+                            <span class="text-red">열세 (차액 +)</span>
+                        </label>
+                        <strong class="text-red" id="kpiLose">0건</strong>
+                    </li>
+                    <li>
+                        <label class="kpi-check-label">
+                            <input type="checkbox" id="chkTie" onchange="applyRowHighlights()"> 
+                            <span class="text-gray">동일가격 (차액 0)</span>
+                        </label>
+                        <strong class="text-gray" id="kpiTie">0건</strong>
+                    </li>
                 </ul>
             </div>
             <div class="kpi-box">
@@ -213,37 +235,30 @@
         thead.appendChild(trHead);
     }
 
-    // 🔥 크기 조절 시작 전 현재 렌더링된 너비를 계산하여 픽스시키는 함수
     function lockTableWidths() {
         const table = document.getElementById('dataTable');
         if (table.classList.contains('is-fixed')) return;
 
         const ths = table.querySelectorAll('thead th');
-        // 브라우저가 자동 계산해준 최대 너비값 읽어오기
         const widths = Array.from(ths).map(th => th.offsetWidth);
         
-        // 각 열에 계산된 너비 고정값 부여
         ths.forEach((th, i) => {
             th.style.width = `${widths[i]}px`;
             th.style.minWidth = `${widths[i]}px`;
             th.style.maxWidth = `${widths[i]}px`;
         });
 
-        // 표 전체 레이아웃을 고정(Fixed) 및 줄바꿈 허용 모드로 전환
         table.classList.add('is-fixed');
         table.style.width = widths.reduce((sum, w) => sum + w, 0) + 'px';
     }
 
     function createResizableColumn(th, resizer) {
-        let x = 0;
-        let w = 0;
+        let x = 0; let w = 0;
 
         const mouseDownHandler = function(e) {
-            // 처음 크기 조절 시 표의 전체 레이아웃 고정 처리
             lockTableWidths();
-
             x = e.clientX; 
-            w = th.offsetWidth; // 현재 열의 실제 너비 저장
+            w = th.offsetWidth; 
 
             document.addEventListener('mousemove', mouseMoveHandler);
             document.addEventListener('mouseup', mouseUpHandler);
@@ -256,19 +271,15 @@
             const dx = e.clientX - x; 
             const newWidth = Math.max(50, w + dx); 
             
-            // 크기가 변경되었을 때만 표와 열의 너비 업데이트
             if (newWidth !== w) {
                 th.style.width = `${newWidth}px`;
                 th.style.minWidth = `${newWidth}px`;
                 th.style.maxWidth = `${newWidth}px`;
                 
-                // 표의 총 너비 재계산
                 const table = document.getElementById('dataTable');
                 const ths = table.querySelectorAll('thead th');
                 let totalWidth = 0;
-                ths.forEach(col => {
-                    totalWidth += parseInt(col.style.width, 10) || col.offsetWidth;
-                });
+                ths.forEach(col => { totalWidth += parseInt(col.style.width, 10) || col.offsetWidth; });
                 table.style.width = `${totalWidth}px`;
                 
                 x = e.clientX;
@@ -313,23 +324,32 @@
         renderTableBody(filteredData);
     }
 
+    // 행 상태(우세/열세/동일) 계산 헬퍼 함수
+    function getRowStatus(row) {
+        let diff = 0;
+        if(row[COL_DIFF] !== undefined && row[COL_DIFF] !== '') {
+            diff = Number(row[COL_DIFF].replace(/[^0-9.-]+/g, ""));
+        } else {
+            let ourPrice = Number((row[COL_OUR_PRICE] || '0').replace(/[^0-9.-]+/g, ""));
+            let netPrice = Number((row[COL_NET_PRICE] || '0').replace(/[^0-9.-]+/g, ""));
+            if (ourPrice > 0 || netPrice > 0) diff = ourPrice - netPrice;
+            else return 'none';
+        }
+
+        if(diff < 0) return 'win';
+        if(diff > 0) return 'lose';
+        return 'tie';
+    }
+
     function updateSummary(data) {
         let win = 0, lose = 0, tie = 0;
         let reqCounts = {}; 
 
         data.forEach(row => {
-            let diff = 0;
-            if(row[COL_DIFF] !== undefined && row[COL_DIFF] !== '') {
-                diff = Number(row[COL_DIFF].replace(/[^0-9.-]+/g, ""));
-            } else {
-                let ourPrice = Number((row[COL_OUR_PRICE] || '0').replace(/[^0-9.-]+/g, ""));
-                let netPrice = Number((row[COL_NET_PRICE] || '0').replace(/[^0-9.-]+/g, ""));
-                if (ourPrice > 0 || netPrice > 0) diff = ourPrice - netPrice;
-            }
-
-            if(diff < 0) win++;
-            else if(diff > 0) lose++;
-            else tie++;
+            let status = getRowStatus(row);
+            if(status === 'win') win++;
+            else if(status === 'lose') lose++;
+            else if(status === 'tie') tie++;
 
             let reqType = row[COL_REQUIRED] || '미지정';
             reqCounts[reqType] = (reqCounts[reqType] || 0) + 1;
@@ -360,12 +380,38 @@
 
         data.forEach(row => {
             const tr = document.createElement('tr');
+            // 🔥 각 행에 상태(win/lose/tie)를 data-status 속성으로 부여
+            tr.dataset.status = getRowStatus(row); 
+
             headers.forEach(h => {
                 const td = document.createElement('td');
                 td.textContent = row[h] || '-';
                 tr.appendChild(td);
             });
             tbody.appendChild(tr);
+        });
+
+        // 표 렌더링 직후 체크박스 상태에 따라 색상 적용
+        applyRowHighlights();
+    }
+
+    // 🔥 체크박스 클릭 시 색상 활성화/비활성화
+    function applyRowHighlights() {
+        const chkWin = document.getElementById('chkWin').checked;
+        const chkLose = document.getElementById('chkLose').checked;
+        const chkTie = document.getElementById('chkTie').checked;
+
+        const rows = document.querySelectorAll('#tableBody tr');
+        rows.forEach(tr => {
+            const status = tr.dataset.status;
+            
+            // 기존 색상 초기화
+            tr.classList.remove('highlight-win', 'highlight-lose', 'highlight-tie');
+            
+            // 체크된 항목만 색상 클래스 부여
+            if (status === 'win' && chkWin) tr.classList.add('highlight-win');
+            if (status === 'lose' && chkLose) tr.classList.add('highlight-lose');
+            if (status === 'tie' && chkTie) tr.classList.add('highlight-tie');
         });
     }
 </script>
