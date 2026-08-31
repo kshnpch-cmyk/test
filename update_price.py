@@ -1,75 +1,82 @@
 import os
 import json
 import time
+import re
 import requests
 import gspread
 from google.oauth2.credentials import Credentials
 from google.auth.transport.requests import Request
+from bs4 import BeautifulSoup
 
-def fetch_naver_price_bypass(search_query):
+def fetch_price_via_duckduckgo(product_name, spec):
     """
-    네이버 모바일 내부 API를 활용하여 418 차단을 우회하고
-    판매채널(J열), 최저가(K열), 택배비(L열) 데이터를 가져옵니다.
+    DuckDuckGo 검색 엔진을 통해 네이버 쇼핑 상품을 우회 검색하고,
+    검색 스니펫 및 링크 데이터에서 [판매채널, 최저가격, 배송비]를 추출합니다.
     """
-    clean_query = search_query.replace("*", " ").strip()
-    print(f"  [조사 요청] 검색어: '{clean_query}'")
+    search_query = f"site:shopping.naver.com {product_name} {spec}".strip()
+    clean_query = search_query.replace("*", " ")
+    print(f"  [우회 조사 요청] 검색어: '{clean_query}'")
     
-    # 418 차단 우회용 네이버 모바일 전용 헤더
     headers = {
-        "User-Agent": "Mozilla/5.0 (iPhone; CPU iPhone OS 17_4_1 like Mac OS X) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/17.4.1 Mobile/15E148 Safari/604.1",
-        "Accept": "application/json, text/plain, */*",
-        "Referer": "https://msearch.shopping.naver.com/",
-        "Accept-Language": "ko-KR,ko;q=0.9"
+        "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36",
+        "Accept-Language": "ko-KR,ko;q=0.9,en-US;q=0.8,en;q=0.7"
     }
     
-    encoded_query = requests.utils.quote(clean_query)
-    # 418 차단을 받지 않는 네이버 모바일 내부 API 주소
-    api_url = f"https://msearch.shopping.naver.com/api/search/all?query={encoded_query}&sort=rel"
+    # DuckDuckGo HTML 검색 URL
+    ddg_url = f"https://html.duckduckgo.com/html/?q={requests.utils.quote(clean_query)}"
     
     try:
-        response = requests.get(api_url, headers=headers, timeout=10)
-        print(f"  [응답 코드] {response.status_code}")
+        response = requests.post(
+            "https://html.duckduckgo.com/html/",
+            data={"q": clean_query},
+            headers=headers,
+            timeout=12
+        )
+        print(f"  [DDG 응답 상태] {response.status_code}")
         
         if response.status_code == 200:
-            data = response.json()
+            soup = BeautifulSoup(response.text, 'html.parser')
+            results = soup.select(".result")
             
-            # JSON 내 상품 리스트 경로 찾기
-            shopping_res = data.get('props', {}).get('pageProps', {}).get('initialResult', {}).get('shoppingResult', {})
-            products = shopping_res.get('products', [])
-            
-            if not products:
-                products = data.get('shoppingResult', {}).get('products', [])
+            for result in results:
+                title_el = result.select_one(".result__title")
+                snippet_el = result.select_one(".result__snippet")
+                
+                title = title_el.text.strip() if title_el else ""
+                snippet = snippet_el.text.strip() if snippet_el else ""
+                full_text = f"{title} {snippet}"
+                
+                # 1. 가격 추출 (예: "30,670원", "1,800원" 등)
+                price_matches = re.findall(r'([\d,]+)\s*원', full_text)
+                valid_prices = []
+                for p in price_matches:
+                    num = int(p.replace(",", ""))
+                    if num >= 100:  # 유효한 상품 금액 판단
+                        valid_prices.append(num)
+                
+                if valid_prices:
+                    sale_price = min(valid_prices)
+                    
+                    # 2. 판매채널 추출
+                    channel_name = "네이버쇼핑"
+                    # 스니펫에서 쇼핑몰 이름 찾기
+                    mall_match = re.search(r'([가-힣a-zA-Z0-9]+스토어|[가-힣a-zA-Z0-9]+몰|쿠팡|11번가|G마켓|옥션|SSG|스마트스토어)', full_text)
+                    if mall_match:
+                        channel_name = mall_match.group(1)
 
-            if products:
-                first = products[0]
-                
-                # 1. J열: 판매채널
-                channel = first.get('mallName') or first.get('mallInfoCache', {}).get('name') or "네이버쇼핑"
-                
-                # 2. K열: 최저가
-                price_val = first.get('price') or first.get('lprice') or 0
-                price = int(price_val)
-                
-                # 3. L열: 택배비
-                delivery_fee = first.get('deliveryFee', 0)
-                delivery_txt = str(first.get('deliveryFeeContent', ''))
-                
-                if delivery_fee == 0 or "무료" in delivery_txt:
-                    shipping = "무료배송"
-                else:
-                    shipping = f"{delivery_fee}원" if isinstance(delivery_fee, int) else delivery_txt
-
-                return channel, price, shipping
-            else:
-                print("  ⚠️ [200 성공했으나 데이터 없음] 검색 결과 상품 배열이 비어있습니다.")
+                    # 3. 배송비 추출
+                    shipping_fee = "무료배송" if "무료배송" in full_text or "무료" in full_text else "기본배송"
+                    
+                    return channel_name, sale_price, shipping_fee
 
     except Exception as e:
-        print(f"  ❌ 예외 발생: {e}")
+        print(f"  ❌ DDG 수집 예외: {e}")
 
     return None, None, None
 
 def run_price_update():
     try:
+        # 1. 구글 인증 처리
         token_secret = os.environ.get('GCP_TOKEN_JSON')
         if not token_secret:
             raise ValueError("❌ GitHub Secret에 'GCP_TOKEN_JSON'이 설정되지 않았습니다.")
@@ -86,12 +93,13 @@ def run_price_update():
 
         gc = gspread.authorize(credentials)
 
+        # 2. 구글 시트 연결
         sheet_url = "https://docs.google.com/spreadsheets/d/1nA0ZtCztY6Qe8UR8-erB98_BIZDYUUjpIQYWNyuePWA/edit"
         doc = gc.open_by_url(sheet_url)
         worksheet = doc.get_worksheet(0)
 
         print("==================================================")
-        print("📊 [우회 API 조사 시작] 3행부터 10행까지 조사를 진행합니다.")
+        print("📊 [DuckDuckGo 우회 수집 가동] 3행부터 10행까지 조사를 시작합니다.")
         print("==================================================\n")
 
         for row_num in range(3, 11):
@@ -103,7 +111,7 @@ def run_price_update():
 
             print(f"▶ [{row_num}행] 품목: '{product_name}' | 규격: '{spec}' | 구분(I열): '{category}'")
 
-            # 예외 조건 체크 ('전용', '예산', '종료'가 구분 항목에 들어있으면 건너뜀)
+            # 예외 조건 체크 ('전용', '예산', '종료'가 구분 항목에 들어있으면 스킵)
             if any(skip_word in category for skip_word in ['전용', '예산', '종료']):
                 print(f"  ⏭️ 스킵됨 (구분 조건 제외: '{category}')\n")
                 continue
@@ -112,14 +120,13 @@ def run_price_update():
                 print(f"  ⏭️ 스킵됨 (품목명 없음)\n")
                 continue
 
-            # 1차 시도: C열(품목명) + D열(규격)
-            search_query = f"{product_name} {spec}".strip()
-            channel, price, shipping = fetch_naver_price_bypass(search_query)
+            # 1차 시도: 품목명 + 규격
+            channel, price, shipping = fetch_price_via_duckduckgo(product_name, spec)
 
-            # 2차 시도 (실패 시): C열(품목명) 단독 검색 (예: '서울우유 바리스타밀크 1L')
+            # 2차 시도 (실패 시): 품목명 단독 (예: '서울우유 바리스타밀크 1L')
             if not channel or price == 0:
                 print(f"  └─ ⚠️ 1차 실패 후 품목명 단독 재검색 시도: '{product_name}'")
-                channel, price, shipping = fetch_naver_price_bypass(product_name.strip())
+                channel, price, shipping = fetch_price_via_duckduckgo(product_name, "")
 
             if not channel or price == 0:
                 channel, price, shipping = "검색결과없음", 0, "-"
@@ -130,9 +137,9 @@ def run_price_update():
             worksheet.update_cell(row_num, 12, shipping)
 
             print(f"  ✔ [완료] J={channel} | K={price:,}원 | L={shipping}\n")
-            time.sleep(2.0)
+            time.sleep(2.5)  # 연속 요청 제한 방지용 대기시간
 
-        print("🎉 수집 작업 및 구글 시트 업데이트가 완료되었습니다!")
+        print("🎉 해외 우회 조사를 통한 구글 시트 업데이트가 완료되었습니다!")
 
     except Exception as e:
         print(f"❌ 오류 발생: {str(e)}")
