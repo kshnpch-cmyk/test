@@ -8,12 +8,50 @@
     <script src="https://cdnjs.cloudflare.com/ajax/libs/PapaParse/5.3.2/papaparse.min.js"></script>
     <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
     <style>
-        body { font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif; background-color: #f8f9fa; margin: 0; padding: 20px; color: #333; }
-        .container { max-width: 1200px; margin: 0 auto; }
-        .card { background: white; border-radius: 12px; padding: 24px; box-shadow: 0 4px 6px rgba(0,0,0,0.05); margin-bottom: 24px; }
+        /* 모든 요소에 box-sizing 적용하여 패딩으로 인한 너비 삐져나옴 방지 */
+        * { box-sizing: border-box; }
+        
+        body { 
+            font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif; 
+            background-color: #f8f9fa; 
+            margin: 0; 
+            padding: 20px; 
+            color: #333; 
+        }
+        
+        /* 🔥 수정포인트 1: max-width 제한을 없애고 가로를 항상 창 크기(100%)에 맞춤 */
+        .container { 
+            width: 100%; 
+            margin: 0 auto; 
+        }
+        
+        .card { 
+            background: white; 
+            border-radius: 12px; 
+            padding: 24px; 
+            box-shadow: 0 4px 6px rgba(0,0,0,0.05); 
+            margin-bottom: 24px; 
+        }
+        
         h1 { margin-top: 0; font-size: 24px; color: #111; }
+        
+        /* 차트도 가로로 길게 퍼지도록 설정 */
         .chart-container { position: relative; height: 400px; width: 100%; }
-        table { width: 100%; border-collapse: collapse; font-size: 14px; }
+        
+        /* 🔥 수정포인트 2: 표를 감싸는 영역 (가로 스크롤바 처리) */
+        .table-responsive {
+            width: 100%;
+            overflow-x: auto; /* 창이 좁을 때만 가로 스크롤 생성 */
+        }
+        
+        /* 🔥 수정포인트 3: 테이블 너비 100% 및 텍스트 줄바꿈 방지 */
+        table { 
+            width: 100%; 
+            border-collapse: collapse; 
+            font-size: 14px; 
+            white-space: nowrap; /* 셀 안의 텍스트가 두 줄로 쪼개지지 않도록 방지 */
+        }
+        
         th, td { padding: 12px 15px; border-bottom: 1px solid #eee; text-align: left; }
         th { background-color: #f1f3f5; font-weight: 600; color: #495057; }
         tr:hover { background-color: #f8f9fa; }
@@ -35,7 +73,8 @@
 
     <div class="card">
         <h2 style="margin-top:0; font-size: 18px;">전체 데이터 상세</h2>
-        <div style="overflow-x: auto;">
+        <!-- 테이블을 반응형 영역으로 감싸기 -->
+        <div class="table-responsive">
             <table id="dataTable">
                 <thead id="tableHead"></thead>
                 <tbody id="tableBody"></tbody>
@@ -49,7 +88,6 @@
     const sheetId = '1nA0ZtCztY6Qe8UR8-erB98_BIZDYUUjpIQYWNyuePWA';
     const csvUrl = `https://docs.google.com/spreadsheets/d/${sheetId}/export?format=csv&gid=0`;
 
-    // PapaParse로 구글 시트 데이터 가져오기
     Papa.parse(csvUrl, {
         download: true,
         header: true,
@@ -60,11 +98,10 @@
         },
         error: function(error) {
             console.error("데이터 로드 실패:", error);
-            alert("구글 시트 데이터를 불러오지 못했습니다. 시트 공유 권한이 '링크가 있는 모든 사용자'인지 확인해주세요.");
+            alert("구글 시트 데이터를 불러오지 못했습니다.");
         }
     });
 
-    // 테이블 렌더링 함수
     function renderTable(data) {
         if(data.length === 0) return;
         const headers = Object.keys(data[0]);
@@ -90,12 +127,10 @@
         });
     }
 
-    // 차트 렌더링 함수
     function renderChart(data) {
         if(data.length === 0) return;
         
-        // ⚠️ 주의: 아래 ['상품명'], ['자사가격'], ['최저가'] 부분은 
-        // 실제 구글 시트의 1행(헤더)에 적힌 글자와 완전히 똑같이 수정해야 차트가 나옵니다.
+        // ⚠️ 구글 시트의 실제 헤더 이름에 맞춰 '상품명', '자사가격', '최저가'를 수정해야 차트가 보입니다.
         const labels = data.map(row => row['상품명'] || row[Object.keys(row)[0]]); 
         const ourPrices = data.map(row => Number((row['자사가격'] || '0').replace(/[^0-9.-]+/g,"")));
         const lowestPrices = data.map(row => Number((row['최저가'] || '0').replace(/[^0-9.-]+/g,"")));
