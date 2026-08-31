@@ -7,38 +7,59 @@ import gspread
 from google.oauth2.credentials import Credentials
 from google.auth.transport.requests import Request
 
+def extract_products_from_json(data):
+    """
+    네이버 __NEXT_DATA__ JSON 내부를 깊이 탐색하여 
+    상품 리스트(products)를 자동으로 찾아냅니다.
+    """
+    try:
+        # 경로 1
+        products = data['props']['pageProps']['initialResult']['shoppingResult']['products']
+        if products: return products
+    except Exception:
+        pass
+        
+    try:
+        # 경로 2
+        products = data['props']['pageProps']['compositeResult']['shoppingResult']['products']
+        if products: return products
+    except Exception:
+        pass
+
+    try:
+        # 경로 3 (모바일/기타)
+        products = data['shoppingResult']['products']
+        if products: return products
+    except Exception:
+        pass
+
+    return []
+
 def fetch_naver_price(search_query):
     """
-    네이버 쇼핑 페이지의 __NEXT_DATA__ 파싱을 통해 
-    실제 최저가(K열), 판매채널(J열), 택배비(L열)를 추출합니다.
+    네이버 쇼핑 페이지에서 최저가(K열), 판매채널(J열), 택배비(L열)를 파싱합니다.
     """
     print(f"  [조사 요청] 검색어: '{search_query}'")
     
-    # 봇 감지 우회용 헤더 설정
     headers = {
         "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36",
         "Accept": "text/html,application/xhtml+xml,application/xml;q=0.9,image/avif,image/webp,*/*;q=0.8",
-        "Accept-Language": "ko-KR,ko;q=0.9,en-US;q=0.8,en;q=0.7",
-        "Sec-Ch-Ua": '"Chromium";v="124", "Google Chrome";v="124"',
-        "Sec-Ch-Ua-Mobile": "?0",
-        "Sec-Ch-Ua-Platform": '"Windows"',
-        "Sec-Fetch-Dest": "document",
-        "Sec-Fetch-Mode": "navigate",
-        "Sec-Fetch-Site": "none",
-        "Sec-Fetch-User": "?1"
+        "Accept-Language": "ko-KR,ko;q=0.9",
+        "Referer": "https://search.shopping.naver.com/"
     }
     
-    encoded_query = requests.utils.quote(search_query)
+    # 규격 및 검색어 내 특수 기호 정제 (* -> 공백)
+    clean_query = search_query.replace("*", " ").strip()
+    encoded_query = requests.utils.quote(clean_query)
     url = f"https://search.shopping.naver.com/search/all?where=all&frm=NVSCTAB&query={encoded_query}"
     
     try:
         response = requests.get(url, headers=headers, timeout=10)
-        print(f"  [응답 상태] {response.status_code}")
         
         if response.status_code == 200:
             html = response.text
             
-            # __NEXT_DATA__ 스크립트 내부의 JSON 데이터 파싱
+            # __NEXT_DATA__ JSON 추출
             pattern = r'<script id="__NEXT_DATA__" type="application/json">(.*?)</script>'
             match = re.search(pattern, html, re.DOTALL)
             
@@ -46,17 +67,16 @@ def fetch_naver_price(search_query):
                 json_str = match.group(1)
                 data = json.loads(json_str)
                 
-                # 검색 결과 목록 접근
-                products = data.get('props', {}).get('pageProps', {}).get('initialResult', {}).get('shoppingResult', {}).get('products', [])
+                products = extract_products_from_json(data)
                 
                 if products:
                     first = products[0]
                     
                     # 1. J열: 판매채널
-                    channel = first.get('mallName') or "네이버쇼핑"
+                    channel = first.get('mallName') or first.get('seller') or "네이버쇼핑"
                     
                     # 2. K열: 판매가
-                    price_val = first.get('price') or first.get('lprice') or 0
+                    price_val = first.get('price') or first.get('lprice') or first.get('discountPrice') or 0
                     price = int(price_val)
                     
                     # 3. L열: 택배비
@@ -71,7 +91,7 @@ def fetch_naver_price(search_query):
                     return channel, price, shipping
 
     except Exception as e:
-        print(f"  ❌ 크롤링 에러: {e}")
+        print(f"  ❌ 수집 예외 발생: {e}")
 
     return None, None, None
 
@@ -100,7 +120,7 @@ def run_price_update():
         worksheet = doc.get_worksheet(0)
 
         print("==================================================")
-        print("📊 [최저가 조사 시작] 3행부터 10행까지 조사를 진행합니다.")
+        print("📊 [네이버 가격 수집 가동] 3행부터 10행까지 조사를 시작합니다.")
         print("==================================================\n")
 
         for row_num in range(3, 11):
@@ -121,14 +141,22 @@ def run_price_update():
                 print(f"  ⏭️ 스킵됨 (품목명 없음)\n")
                 continue
 
-            # 1차 시도: C열(품목명) + D열(규격)
+            # 1차 시도: 품목명 + 규격
             search_query = f"{product_name} {spec}".strip()
             channel, price, shipping = fetch_naver_price(search_query)
 
-            # 2차 시도 (실패 시): C열(품목명) 단독 검색
+            # 2차 시도 (실패 시): 품목명 단독 (예: '서울우유 바리스타밀크 1L')
             if not channel or price == 0:
-                print(f"  └─ ⚠️ 1차 검색 실패. 품목명 단독 재검색 시도: '{product_name}'")
+                print(f"  └─ ⚠️ 1차 실패 후 품목명 단독 재검색: '{product_name}'")
                 channel, price, shipping = fetch_naver_price(product_name.strip())
+
+            # 3차 시도 (실패 시): 품목명에서 브랜드/핵심어만 추출
+            if not channel or price == 0:
+                # 괄호나 영문 등 일부 간소화
+                short_name = re.sub(r'\(.*?\)', '', product_name).strip()
+                if short_name != product_name:
+                    print(f"  └─ ⚠️ 2차 실패 후 품목명 간소화 재검색: '{short_name}'")
+                    channel, price, shipping = fetch_naver_price(short_name)
 
             if not channel or price == 0:
                 channel, price, shipping = "검색결과없음", 0, "-"
@@ -141,7 +169,7 @@ def run_price_update():
             print(f"  ✔ [완료] J={channel} | K={price:,}원 | L={shipping}\n")
             time.sleep(2.0)
 
-        print("🎉 모든 상품 조사 및 시트 업데이트가 완료되었습니다!")
+        print("🎉 모든 수집 및 구글 시트 업데이트 완료!")
 
     except Exception as e:
         print(f"❌ 오류 발생: {str(e)}")
