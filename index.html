@@ -4,9 +4,8 @@
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>가격 비교 대시보드</title>
-    <!-- 데이터 파싱 및 차트 라이브러리 -->
+    <!-- 데이터 파싱 라이브러리 (차트 라이브러리 삭제됨) -->
     <script src="https://cdnjs.cloudflare.com/ajax/libs/PapaParse/5.3.2/papaparse.min.js"></script>
-    <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
     <style>
         * { box-sizing: border-box; }
         
@@ -29,30 +28,40 @@
         }
         
         h1 { margin-top: 0; font-size: 24px; color: #111; }
-        .chart-container { position: relative; height: 400px; width: 100%; }
         
-        .table-responsive { width: 100%; overflow-x: auto; }
-        
-        table { 
-            width: 100%; 
-            border-collapse: collapse; 
-            font-size: 14px; 
-            white-space: nowrap; 
+        /* 🔥 요약 통계(KPI) 카드 스타일 */
+        .summary-grid {
+            display: grid;
+            grid-template-columns: repeat(auto-fit, minmax(200px, 1fr));
+            gap: 16px;
+            margin-bottom: 20px;
         }
-        
+        .kpi-box {
+            background-color: #f8f9fa;
+            border: 1px solid #e9ecef;
+            border-radius: 8px;
+            padding: 16px;
+        }
+        .kpi-title { font-size: 13px; color: #6c757d; font-weight: 600; margin-bottom: 8px; }
+        .kpi-value { font-size: 24px; font-weight: bold; color: #212529; margin-bottom: 12px; }
+        .kpi-list { font-size: 13px; color: #495057; line-height: 1.5; margin: 0; padding: 0; list-style: none; }
+        .kpi-list li { display: flex; justify-content: space-between; border-bottom: 1px dashed #dee2e6; padding: 4px 0; }
+        .kpi-list li:last-child { border-bottom: none; }
+
+        .text-blue { color: #3b82f6; }
+        .text-red { color: #ef4444; }
+
+        /* 테이블 스타일 */
+        .table-responsive { width: 100%; overflow-x: auto; }
+        table { width: 100%; border-collapse: collapse; font-size: 14px; white-space: nowrap; }
         th, td { padding: 12px 15px; border-bottom: 1px solid #eee; text-align: left; }
         th { background-color: #f1f3f5; font-weight: 600; color: #495057; vertical-align: top; }
         tr:hover { background-color: #f8f9fa; }
 
-        /* 🔥 추가된 부분: 필터 입력창 스타일 */
+        /* 필터 입력창 스타일 */
         .filter-input {
-            width: 100%;
-            padding: 6px 8px;
-            margin-top: 8px;
-            border: 1px solid #ccc;
-            border-radius: 4px;
-            font-size: 13px;
-            outline: none;
+            width: 100%; padding: 6px 8px; margin-top: 8px;
+            border: 1px solid #ccc; border-radius: 4px; font-size: 13px; outline: none;
         }
         .filter-input:focus { border-color: #3b82f6; }
     </style>
@@ -61,18 +70,39 @@
 
 <div class="container">
     <div class="card">
-        <h1>📊 실시간 가격 경쟁력 대시보드</h1>
-        <p>구글 스프레드시트 데이터가 실시간으로 반영됩니다.</p>
-    </div>
-
-    <div class="card">
-        <div class="chart-container">
-            <canvas id="myChart"></canvas>
+        <h1>📊 실시간 가격 경쟁력 현황</h1>
+        
+        <!-- 🔥 추가된 부분: 요약 통계(KPI) 영역 -->
+        <div class="summary-grid">
+            <div class="kpi-box">
+                <div class="kpi-title">📦 전체 품목 수</div>
+                <div class="kpi-value" id="kpiTotal">0건</div>
+            </div>
+            <div class="kpi-box">
+                <div class="kpi-title">💰 가격 경쟁력 (자사 기준)</div>
+                <ul class="kpi-list">
+                    <li><span>우세 (자사가 저렴)</span> <strong class="text-blue" id="kpiWin">0건</strong></li>
+                    <li><span>열세 (자사가 비쌈)</span> <strong class="text-red" id="kpiLose">0건</strong></li>
+                    <li><span>동일가격</span> <strong id="kpiTie">0건</strong></li>
+                </ul>
+            </div>
+            <div class="kpi-box">
+                <div class="kpi-title">👤 사람별 (담당자) 현황</div>
+                <ul class="kpi-list" id="kpiPerson">
+                    <li>데이터 분석 중...</li>
+                </ul>
+            </div>
+            <div class="kpi-box">
+                <div class="kpi-title">⭐ 필수품목 현황</div>
+                <ul class="kpi-list" id="kpiRequired">
+                    <li>데이터 분석 중...</li>
+                </ul>
+            </div>
         </div>
     </div>
 
     <div class="card">
-        <h2 style="margin-top:0; font-size: 18px;">전체 데이터 상세</h2>
+        <h2 style="margin-top:0; font-size: 18px;">전체 데이터 상세 (검색 가능)</h2>
         <div class="table-responsive">
             <table id="dataTable">
                 <thead id="tableHead"></thead>
@@ -86,13 +116,19 @@
     const sheetId = '1nA0ZtCztY6Qe8UR8-erB98_BIZDYUUjpIQYWNyuePWA';
     const csvUrl = `https://docs.google.com/spreadsheets/d/${sheetId}/export?format=csv&gid=0`;
 
+    // ⚠️ 중요: 구글 시트의 1행(헤더)에 적힌 글자와 완벽히 일치해야 숫자가 정상 계산됩니다.
+    const COL_OUR_PRICE = '자사가격';     // 자사 가격 열 이름
+    const COL_NET_PRICE = '최저가';       // 인터넷 최저가 열 이름
+    const COL_PERSON = '담당자';          // 사람(담당자) 열 이름
+    const COL_REQUIRED = '필수여부';      // 필수 여부 열 이름
+
     Papa.parse(csvUrl, {
         download: true,
         header: true,
         complete: function(results) {
             const data = results.data.filter(row => Object.keys(row).length > 0 && Object.values(row)[0] !== "");
+            renderSummary(data);
             renderTable(data);
-            renderChart(data);
         },
         error: function(error) {
             console.error("데이터 로드 실패:", error);
@@ -100,40 +136,78 @@
         }
     });
 
+    // 🔥 추가된 부분: 요약 통계 계산 함수
+    function renderSummary(data) {
+        let win = 0, lose = 0, tie = 0;
+        let personCounts = {};
+        let requiredCounts = {};
+
+        data.forEach(row => {
+            // 1. 가격 우세/열세 계산
+            let ourPrice = Number((row[COL_OUR_PRICE] || '0').replace(/[^0-9.-]+/g,""));
+            let netPrice = Number((row[COL_NET_PRICE] || '0').replace(/[^0-9.-]+/g,""));
+            
+            if(ourPrice > 0 && netPrice > 0) {
+                if(ourPrice < netPrice) win++;
+                else if(ourPrice > netPrice) lose++;
+                else tie++;
+            }
+
+            // 2. 사람(담당자)별 집계
+            let person = row[COL_PERSON] || '미지정';
+            personCounts[person] = (personCounts[person] || 0) + 1;
+
+            // 3. 필수여부 집계
+            let required = row[COL_REQUIRED] || '미지정';
+            requiredCounts[required] = (requiredCounts[required] || 0) + 1;
+        });
+
+        // HTML에 통계 결과 밀어넣기
+        document.getElementById('kpiTotal').textContent = data.length + "건";
+        document.getElementById('kpiWin').textContent = win + "건";
+        document.getElementById('kpiLose').textContent = lose + "건";
+        document.getElementById('kpiTie').textContent = tie + "건";
+
+        // 객체를 리스트(HTML)로 변환하는 헬퍼 함수
+        const generateListHTML = (obj) => {
+            const entries = Object.entries(obj).sort((a, b) => b[1] - a[1]); // 건수 많은 순 정렬
+            if(entries.length === 0 || (entries.length === 1 && entries[0][0] === '미지정')) {
+                return `<li>해당 열(Column)을 찾을 수 없음</li>`;
+            }
+            return entries.map(([key, count]) => `<li><span>${key}</span> <strong>${count}건</strong></li>`).join('');
+        };
+
+        document.getElementById('kpiPerson').innerHTML = generateListHTML(personCounts);
+        document.getElementById('kpiRequired').innerHTML = generateListHTML(requiredCounts);
+    }
+
+    // 테이블 렌더링 (이전과 동일)
     function renderTable(data) {
         if(data.length === 0) return;
         const headers = Object.keys(data[0]);
         
         const thead = document.getElementById('tableHead');
         const tbody = document.getElementById('tableBody');
-        
-        // 초기화 (재렌더링 방지)
-        thead.innerHTML = '';
-        tbody.innerHTML = '';
+        thead.innerHTML = ''; tbody.innerHTML = '';
 
-        // 1. 헤더 및 필터 입력창 생성
         const trHead = document.createElement('tr');
         headers.forEach((h, index) => {
             const th = document.createElement('th');
-            th.textContent = h; // 컬럼명 텍스트
+            th.textContent = h;
 
-            // 필터 검색창 추가
             const input = document.createElement('input');
             input.type = 'text';
             input.className = 'filter-input';
             input.placeholder = h + ' 검색';
             input.dataset.colIndex = index;
-            
-            // 키보드 입력 시 필터링 함수 실행
             input.addEventListener('keyup', filterTable);
 
-            th.appendChild(document.createElement('br')); // 줄바꿈
+            th.appendChild(document.createElement('br'));
             th.appendChild(input);
             trHead.appendChild(th);
         });
         thead.appendChild(trHead);
 
-        // 2. 테이블 본문 데이터 생성
         data.forEach(row => {
             const tr = document.createElement('tr');
             headers.forEach(h => {
@@ -145,7 +219,7 @@
         });
     }
 
-    // 🔥 추가된 부분: 테이블 필터링 로직
+    // 필터링 로직 (이전과 동일)
     function filterTable() {
         const inputs = document.querySelectorAll('.filter-input');
         const filters = Array.from(inputs).map(input => input.value.toLowerCase().trim());
@@ -158,44 +232,16 @@
 
             for (let j = 0; j < filters.length; j++) {
                 const filterValue = filters[j];
-                // 검색어가 입력된 열(Column)에 대해서만 검사
                 if (filterValue) {
                     const cellText = cells[j].textContent.toLowerCase();
                     if (cellText.indexOf(filterValue) === -1) {
                         displayRow = false;
-                        break; // 하나라도 조건에 안 맞으면 행 숨김 처리
+                        break;
                     }
                 }
             }
-            // 조건에 맞으면 보이고, 안 맞으면 숨기기
             rows[i].style.display = displayRow ? '' : 'none';
         }
-    }
-
-    function renderChart(data) {
-        if(data.length === 0) return;
-        
-        // ⚠️ 구글 시트의 실제 헤더 이름에 맞춰 '상품명', '자사가격', '최저가'를 수정해야 차트가 보입니다.
-        const labels = data.map(row => row['상품명'] || row[Object.keys(row)[0]]); 
-        const ourPrices = data.map(row => Number((row['자사가격'] || '0').replace(/[^0-9.-]+/g,"")));
-        const lowestPrices = data.map(row => Number((row['최저가'] || '0').replace(/[^0-9.-]+/g,"")));
-
-        const ctx = document.getElementById('myChart').getContext('2d');
-        new Chart(ctx, {
-            type: 'bar',
-            data: {
-                labels: labels,
-                datasets: [
-                    { label: '자사가격', data: ourPrices, backgroundColor: '#3b82f6', borderRadius: 4 },
-                    { label: '인터넷최저가', data: lowestPrices, backgroundColor: '#ef4444', borderRadius: 4 }
-                ]
-            },
-            options: {
-                responsive: true,
-                maintainAspectRatio: false,
-                scales: { y: { beginAtZero: true } }
-            }
-        });
     }
 </script>
 
