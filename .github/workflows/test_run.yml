@@ -15,8 +15,11 @@ jobs:
         with:
           python-version: '3.10'
 
-      - name: 필요 라이브러리 설치 (beautifulsoup4 추가)
-        run: pip install gspread google-auth google-auth-oauthlib requests beautifulsoup4
+      - name: 필요 라이브러리 및 셀레니움/크롬 설치
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y google-chrome-stable
+          pip install gspread google-auth google-auth-oauthlib selenium webdriver-manager beautifulsoup4
 
       - name: 가격 조사 및 시트 업데이트 스크립트 실행
         env:
