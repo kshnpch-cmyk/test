@@ -22,18 +22,11 @@
         }
         
         .container { 
-            width: 100%; 
-            display: flex;
-            flex-direction: column;
-            flex: 1;
-            min-height: 0; 
+            width: 100%; display: flex; flex-direction: column; flex: 1; min-height: 0; 
         }
         
         .card { 
-            background: white; 
-            border-radius: 12px; 
-            padding: 24px; 
-            box-shadow: 0 4px 6px rgba(0,0,0,0.05); 
+            background: white; border-radius: 12px; padding: 24px; box-shadow: 0 4px 6px rgba(0,0,0,0.05); 
         }
         
         .kpi-card { flex-shrink: 0; margin-bottom: 20px; }
@@ -58,17 +51,22 @@
         .table-responsive { 
             width: 100%; flex: 1; overflow: auto; border: 1px solid #e9ecef; border-radius: 4px; min-height: 0;
         }
+        
+        /* 🔥 수정된 부분 1: 테이블과 셀에서 줄바꿈(nowrap) 금지 해제 */
         table { 
-            width: 100%; border-collapse: separate; border-spacing: 0; font-size: 14px; white-space: nowrap; 
+            width: 100%; border-collapse: separate; border-spacing: 0; font-size: 14px; 
+            /* white-space: nowrap 삭제됨 */
         }
         th, td { 
             padding: 12px 15px; border-bottom: 1px solid #eee; border-right: 1px solid #eee; text-align: left; 
+            /* 너비가 줄어들면 강제로 줄바꿈되도록 설정 */
+            white-space: normal; 
+            word-break: break-word; 
         }
         td:last-child, th:last-child { border-right: none; }
         
-        /* 테이블 헤더(고정) 설정 */
         thead th { 
-            position: sticky; 
+            position: sticky !important; 
             top: 0; 
             background-color: #f1f3f5; 
             font-weight: 600; 
@@ -76,37 +74,19 @@
             vertical-align: top; 
             z-index: 10; 
             box-shadow: 0 2px 2px -1px rgba(0, 0, 0, 0.1); 
-            /* 🔥 리사이저 배치를 위해 relative 추가 */
             position: relative; 
         }
-        /* sticky와 relative를 동시 적용하기 위해 상단 고정 방식 보완 */
-        thead th { position: sticky !important; }
         tr:hover td { background-color: #f8f9fa; }
 
         .filter-input { width: 100%; padding: 6px 8px; margin-top: 8px; border: 1px solid #ccc; border-radius: 4px; font-size: 13px; outline: none; }
         .filter-input:focus { border-color: #3b82f6; }
         .summary-badge { font-size: 14px; color: #6366f1; font-weight: normal; margin-left: 10px; }
 
-        /* 🔥 컬럼 사이즈 조절 핸들러 (리사이저) 스타일 */
         .resizer {
-            position: absolute;
-            top: 0;
-            right: 0;
-            width: 6px;
-            height: 100%;
-            cursor: col-resize;
-            user-select: none;
-            background-color: transparent;
-            z-index: 11;
+            position: absolute; top: 0; right: 0; width: 6px; height: 100%; cursor: col-resize; user-select: none; background-color: transparent; z-index: 11;
         }
-        .resizer:hover, .resizer.resizing {
-            background-color: #3b82f6; /* 드래그 시 파란색 구분선 표시 */
-        }
-        /* 드래그 도중 전체 텍스트 선택 방지 */
-        body.resizing-active {
-            user-select: none;
-            cursor: col-resize;
-        }
+        .resizer:hover, .resizer.resizing { background-color: #3b82f6; }
+        body.resizing-active { user-select: none; cursor: col-resize; }
     </style>
 </head>
 <body>
@@ -220,46 +200,44 @@
             th.appendChild(document.createElement('br'));
             th.appendChild(input);
             
-            // 🔥 컬럼 너비 조절용 요소(리사이저) 추가
             const resizer = document.createElement('div');
             resizer.className = 'resizer';
             th.appendChild(resizer);
             
-            // 드래그 기능 부착
             createResizableColumn(th, resizer);
-
             trHead.appendChild(th);
         });
         thead.appendChild(trHead);
     }
 
-    // 🔥 리사이즈(너비 조절) 구현 함수
+    // 🔥 수정된 부분 2: 자바스크립트 크기 조절 시 강제로 maxWidth 적용
     function createResizableColumn(th, resizer) {
         let x = 0;
         let w = 0;
 
         const mouseDownHandler = function(e) {
-            x = e.clientX; // 클릭한 마우스 X 좌표
+            x = e.clientX; 
             const styles = window.getComputedStyle(th);
-            w = parseInt(styles.width, 10); // 현재 컬럼 너비
+            w = parseInt(styles.width, 10); 
 
-            // 마우스 이동/클릭해제 이벤트 리스너 등록
             document.addEventListener('mousemove', mouseMoveHandler);
             document.addEventListener('mouseup', mouseUpHandler);
 
-            // 시각적 효과를 위한 클래스 추가
             resizer.classList.add('resizing');
             document.body.classList.add('resizing-active');
         };
 
         const mouseMoveHandler = function(e) {
-            const dx = e.clientX - x; // 마우스 이동 거리 계산
-            th.style.width = `${w + dx}px`;
-            th.style.minWidth = `${w + dx}px`;
+            const dx = e.clientX - x; 
+            const newWidth = Math.max(50, w + dx); // 최소 너비 50px 보장
+            
+            // width, minWidth, maxWidth를 모두 동일하게 설정하여 강제로 줄임
+            th.style.width = `${newWidth}px`;
+            th.style.minWidth = `${newWidth}px`;
+            th.style.maxWidth = `${newWidth}px`;
         };
 
         const mouseUpHandler = function() {
-            // 이벤트 리스너 제거 및 효과 초기화
             document.removeEventListener('mousemove', mouseMoveHandler);
             document.removeEventListener('mouseup', mouseUpHandler);
             resizer.classList.remove('resizing');
