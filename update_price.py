@@ -1,66 +1,82 @@
 import os
 import json
 import time
+import re
 import requests
 import gspread
 from google.oauth2.credentials import Credentials
 from google.auth.transport.requests import Request
+from bs4 import BeautifulSoup
 
-def fetch_naver_mobile_price(search_query):
+def fetch_naver_price_html(search_query):
     """
-    네이버 모바일 쇼핑 검색을 조회하여 차단(418)을 우회하고
-    J(채널), K(가격), L(택배비) 정보를 수집합니다.
+    네이버 쇼핑 웹 페이지의 최신 HTML 구조에서 
+    첫 번째 최저가 상품의 [판매채널, 판매가, 택배비]를 직접 추출합니다.
     """
-    print(f"  [조사 요청] 키워드: '{search_query}'")
+    print(f"  [조사 요청] 검색어: '{search_query}'")
     
     headers = {
-        "User-Agent": "Mozilla/5.0 (iPhone; CPU iPhone OS 17_0 like Mac OS X) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/17.0 Mobile/15E148 Safari/604.1",
-        "Accept": "text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8",
-        "Accept-Language": "ko-KR,ko;q=0.9",
-        "Referer": "https://msearch.shopping.naver.com/"
+        "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/123.0.0.0 Safari/537.36",
+        "Accept": "text/html,application/xhtml+xml,application/xml;q=0.9,image/webp,*/*;q=0.8",
+        "Accept-Language": "ko-KR,ko;q=0.9,en-US;q=0.8,en;q=0.7",
+        "Referer": "https://search.shopping.naver.com/"
     }
     
     encoded_query = requests.utils.quote(search_query)
-    url = f"https://msearch.shopping.naver.com/search/all?query={encoded_query}"
+    url = f"https://search.shopping.naver.com/search/all?where=all&frm=NVSCTAB&query={encoded_query}"
     
     try:
         response = requests.get(url, headers=headers, timeout=10)
-        print(f"  [응답 코드] {response.status_code}")
         
         if response.status_code == 200:
-            html_text = response.text
-            from bs4 import BeautifulSoup
-            soup = BeautifulSoup(html_text, 'html.parser')
+            soup = BeautifulSoup(response.text, 'html.parser')
             
-            # 모바일 쇼핑 검색 결과 상품 카드 추출
-            product = soup.select_one("div[class*='product_item']") or soup.select_one("li[class*='product_item']") or soup.select_one("div[class*='list_search']")
+            # 1. 네이버 쇼핑 결과에서 가격(price) 태그 찾기
+            # 'price_num', 'price_price', 또는 숫자+원 형태 패턴 수집
+            prices = soup.find_all(text=re.compile(r'[\d,]+원'))
             
-            if product:
-                # 1. J열: 판매채널
-                channel_el = product.select_one("[class*='mall']") or product.select_one("[class*='seller']")
-                channel_name = channel_el.text.strip() if channel_el else "네이버쇼핑"
-                
-                # 2. K열: 판매가
-                price_el = product.select_one("[class*='price']")
-                if price_el:
-                    import re
-                    price_nums = re.findall(r'\d+', price_el.text.replace(",", ""))
-                    sale_price = int("".join(price_nums)) if price_nums else 0
-                else:
-                    sale_price = 0
-                
-                # 3. L열: 택배비
-                delivery_el = product.select_one("[class*='delivery']") or product.select_one("[class*='ship']")
-                if delivery_el:
-                    delivery_text = delivery_el.text.strip()
-                    shipping_fee = "무료배송" if "무료" in delivery_text else delivery_text
-                else:
-                    shipping_fee = "기본배송"
+            # 2. HTML 내부에 포함된 JSON 데이터(최저가 정밀 파싱)
+            # 네이버 쇼핑은 __NEXT_DATA__ 태그 안에 전체 검색 결과 JSON이 들어있습니다.
+            script_tag = soup.find('script', id='__NEXT_DATA__')
+            if script_tag and script_tag.string:
+                try:
+                    raw_json = json.loads(script_tag.string)
+                    products = raw_json['props']['pageProps']['initialResult']['shoppingResult']['products']
+                    if products:
+                        first = products[0]
+                        channel = first.get('mallName') or "네이버쇼핑"
+                        price = int(first.get('price') or first.get('lprice') or 0)
+                        
+                        delivery = first.get('deliveryFeeContent') or first.get('deliveryFee') or "기본배송"
+                        if str(delivery) == '0' or '무료' in str(delivery):
+                            shipping = "무료배송"
+                        else:
+                            shipping = f"{delivery}원" if isinstance(delivery, int) else str(delivery)
+                            
+                        return channel, price, shipping
+                except Exception:
+                    pass
 
-                return channel_name, sale_price, shipping_fee
+            # HTML 일반 요소 접근 (구조 대응)
+            product_card = soup.select_one("div[class*='product_item']") or soup.select_one("li[class*='basicList_item']")
+            if product_card:
+                channel_el = product_card.select_one("[class*='mall']") or product_card.select_one("[class*='seller']")
+                channel = channel_el.text.strip() if channel_el else "네이버쇼핑"
+                
+                price_el = product_card.select_one("[class*='price']")
+                if price_el:
+                    nums = re.findall(r'\d+', price_el.text.replace(",", ""))
+                    price = int("".join(nums)) if nums else 0
+                else:
+                    price = 0
+                    
+                delivery_el = product_card.select_one("[class*='delivery']")
+                shipping = delivery_el.text.strip() if delivery_el else "기본배송"
+                
+                return channel, price, shipping
 
     except Exception as e:
-        print(f"  ❌ 크롤링 예외: {e}")
+        print(f"  ❌ 크롤링 에러: {e}")
 
     return None, None, None
 
@@ -89,21 +105,19 @@ def run_price_update():
         worksheet = doc.get_worksheet(0)
 
         print("==================================================")
-        print("📊 [실제 수집 가동] 3행부터 10행까지 처리합니다.")
+        print("📊 [네이버 가격 추출 가동] 3행부터 10행까지 조사를 시작합니다.")
         print("==================================================\n")
 
         for row_num in range(3, 11):
             row_values = worksheet.row_values(row_num)
             
-            # 정확한 시트 열 매핑
             product_name = row_values[2] if len(row_values) >= 3 else ""  # C열 (품목명)
             spec = row_values[3] if len(row_values) >= 4 else ""          # D열 (규격)
-            category = row_values[8] if len(row_values) >= 9 else ""      # I열 (구분: 전용, 유사, 동일 등)
-            note = row_values[13] if len(row_values) >= 14 else ""        # N열 (특이사항)
+            category = row_values[8] if len(row_values) >= 9 else ""      # I열 (구분)
 
             print(f"▶ [{row_num}행] 품목: '{product_name}' | 규격: '{spec}' | 구분(I열): '{category}'")
 
-            # 스킵 조건: I열(구분)에 '전용', '예산', '종료' 포함 시 수집 제외
+            # 예외 조건 체크 (전용, 예산, 종료 스킵)
             if any(skip_word in category for skip_word in ['전용', '예산', '종료']):
                 print(f"  ⏭️ 스킵됨 (구분 조건 제외: '{category}')\n")
                 continue
@@ -112,27 +126,27 @@ def run_price_update():
                 print(f"  ⏭️ 스킵됨 (품목명 없음)\n")
                 continue
 
-            # 1차 시도: C열(품목명) + D열(규격)
+            # 1차 검색 시도: 품목명 + 규격
             search_query = f"{product_name} {spec}".strip()
-            channel, price, shipping = fetch_naver_mobile_price(search_query)
+            channel, price, shipping = fetch_naver_price_html(search_query)
 
-            # 2차 시도 (실패 시): C열(품목명) 단독
-            if not channel:
-                print(f"  └─ ⚠️ 1차 실패, C열 단독 재검색 시도: '{product_name}'")
-                channel, price, shipping = fetch_naver_mobile_price(product_name.strip())
+            # 2차 검색 시도 (실패 시): 품목명 단독
+            if not channel or price == 0:
+                print(f"  └─ ⚠️ 1차 실패 후 품목명 단독 재검색 시도: '{product_name}'")
+                channel, price, shipping = fetch_naver_price_html(product_name.strip())
 
-            if not channel:
+            if not channel or price == 0:
                 channel, price, shipping = "검색결과없음", 0, "-"
 
-            # J열(10: 판매채널), K열(11: 판매가), L열(12: 택배비) 업데이트
+            # 구글 시트 J열(10), K열(11), L열(12) 업데이트
             worksheet.update_cell(row_num, 10, channel)
             worksheet.update_cell(row_num, 11, price)
             worksheet.update_cell(row_num, 12, shipping)
 
-            print(f"  ✔ [완료] J={channel} | K={price}원 | L={shipping}\n")
+            print(f"  ✔ [완료] J={channel} | K={price:,}원 | L={shipping}\n")
             time.sleep(2.0)
 
-        print("🎉 수집 작업이 완료되었습니다!")
+        print("🎉 수집 작업 완료!")
 
     except Exception as e:
         print(f"❌ 오류 발생: {str(e)}")
