@@ -9,32 +9,57 @@
     <style>
         * { box-sizing: border-box; }
         
+        /* 🔥 1. body를 화면 높이(100vh)에 맞추고 전체 스크롤 숨김 */
         body { 
             font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif; 
             background-color: #f8f9fa; 
             margin: 0; 
             padding: 20px; 
             color: #333; 
+            height: 100vh; 
+            display: flex;
+            flex-direction: column;
+            overflow: hidden; 
         }
         
-        .container { width: 100%; margin: 0 auto; }
+        /* 🔥 2. 컨테이너가 남은 높이를 꽉 채우도록 설정 */
+        .container { 
+            width: 100%; 
+            display: flex;
+            flex-direction: column;
+            flex: 1;
+            min-height: 0; /* Flex 자식 내부 스크롤을 위해 필수 */
+        }
         
         .card { 
             background: white; 
             border-radius: 12px; 
             padding: 24px; 
             box-shadow: 0 4px 6px rgba(0,0,0,0.05); 
-            margin-bottom: 24px; 
         }
         
-        h1 { margin-top: 0; font-size: 24px; color: #111; }
+        /* 상단 요약 카드 (크기 고정) */
+        .kpi-card {
+            flex-shrink: 0;
+            margin-bottom: 20px;
+        }
+
+        /* 🔥 3. 하단 표 카드 (남은 공간을 모두 차지하도록 flex: 1 적용) */
+        .table-card {
+            flex: 1;
+            display: flex;
+            flex-direction: column;
+            min-height: 0;
+            margin-bottom: 0;
+        }
+
+        h1 { margin-top: 0; font-size: 24px; color: #111; margin-bottom: 20px; }
         
         /* 요약 통계(KPI) 카드 스타일 */
         .summary-grid {
             display: grid;
             grid-template-columns: repeat(auto-fit, minmax(220px, 1fr));
             gap: 16px;
-            margin-bottom: 20px;
         }
         .kpi-box {
             background-color: #f8f9fa;
@@ -53,7 +78,6 @@
         .text-blue { color: #3b82f6; }
         .text-red { color: #ef4444; }
 
-        /* 🔥 상단 글로벌 필터(Select) 스타일 */
         .global-select {
             width: 100%;
             padding: 8px;
@@ -63,32 +87,67 @@
             outline: none;
             background-color: white;
             cursor: pointer;
-            margin-top: auto; /* 하단 정렬 */
+            margin-top: auto;
         }
         .global-select:focus { border-color: #3b82f6; }
 
-        /* 테이블 스타일 */
-        .table-responsive { width: 100%; overflow-x: auto; }
-        table { width: 100%; border-collapse: collapse; font-size: 14px; white-space: nowrap; }
-        th, td { padding: 12px 15px; border-bottom: 1px solid #eee; text-align: left; }
-        th { background-color: #f1f3f5; font-weight: 600; color: #495057; vertical-align: top; }
-        tr:hover { background-color: #f8f9fa; }
+        /* 🔥 4. 표를 감싸는 영역이 남은 공간을 채우고 스크롤 생성 */
+        .table-responsive { 
+            width: 100%; 
+            flex: 1;       /* 카드 안에서 남은 공간 꽉 채우기 */
+            overflow: auto; /* 내용이 넘치면 스크롤바 생성 */
+            border: 1px solid #e9ecef;
+            border-radius: 4px;
+            min-height: 0;
+        }
+        table { 
+            width: 100%; 
+            border-collapse: separate; 
+            border-spacing: 0;
+            font-size: 14px; 
+            white-space: nowrap; 
+        }
+        th, td { 
+            padding: 12px 15px; 
+            border-bottom: 1px solid #eee; 
+            border-right: 1px solid #eee; 
+            text-align: left; 
+        }
+        td:last-child, th:last-child { border-right: none; }
+        
+        thead th { 
+            position: sticky; 
+            top: 0; 
+            background-color: #f1f3f5; 
+            font-weight: 600; 
+            color: #495057; 
+            vertical-align: top; 
+            z-index: 10; 
+            box-shadow: 0 2px 2px -1px rgba(0, 0, 0, 0.1); 
+        }
+        tr:hover td { background-color: #f8f9fa; }
 
-        /* 테이블 내 개별 필터 입력창 스타일 */
         .filter-input {
             width: 100%; padding: 6px 8px; margin-top: 8px;
             border: 1px solid #ccc; border-radius: 4px; font-size: 13px; outline: none;
         }
         .filter-input:focus { border-color: #3b82f6; }
+
+        .summary-badge {
+            font-size: 14px;
+            color: #6366f1;
+            font-weight: normal;
+            margin-left: 10px;
+        }
     </style>
 </head>
 <body>
 
 <div class="container">
-    <div class="card">
+    <!-- 상단 요약 카드 (크기 고정, kpi-card 클래스 추가) -->
+    <div class="card kpi-card">
         <h1>📊 실시간 가격 경쟁력 현황</h1>
         
-        <!-- 요약 통계(KPI) 영역 -->
         <div class="summary-grid">
             <div class="kpi-box">
                 <div class="kpi-title">📦 조회된 품목 수</div>
@@ -105,14 +164,14 @@
             </div>
             
             <div class="kpi-box">
-                <div class="kpi-title">👤 담당자 필터 (선택 시 전체반영)</div>
+                <div class="kpi-title">👤 담당자 필터</div>
                 <select id="filterPerson" class="global-select" onchange="applyFilters()">
                     <option value="">모든 담당자 보기</option>
                 </select>
             </div>
             
             <div class="kpi-box">
-                <div class="kpi-title">⭐ 필수품목 필터 (선택 시 전체반영)</div>
+                <div class="kpi-title">⭐ 필수품목 필터</div>
                 <select id="filterRequired" class="global-select" onchange="applyFilters()">
                     <option value="">전체 품목 보기</option>
                 </select>
@@ -120,8 +179,10 @@
         </div>
     </div>
 
-    <div class="card">
-        <h2 style="margin-top:0; font-size: 18px;">데이터 상세 (추가 검색 가능)</h2>
+    <!-- 하단 표 카드 (남은 공간 자동 채움, table-card 클래스 추가) -->
+    <div class="card table-card">
+        <h2 id="tableTitle" style="margin-top:0; margin-bottom:15px; font-size: 18px;">데이터 상세</h2>
+        
         <div class="table-responsive">
             <table id="dataTable">
                 <thead id="tableHead"></thead>
@@ -135,28 +196,25 @@
     const sheetId = '1nA0ZtCztY6Qe8UR8-erB98_BIZDYUUjpIQYWNyuePWA';
     const csvUrl = `https://docs.google.com/spreadsheets/d/${sheetId}/export?format=csv&gid=0`;
 
-    // ⚠️ 중요: 구글 시트의 1행(헤더)에 적힌 글자와 완벽히 일치해야 합니다.
     const COL_OUR_PRICE = '자사가격';
     const COL_NET_PRICE = '최저가';
-    const COL_DIFF = '차액';              // '차액' 열이 있다면 우선 사용합니다.
+    const COL_DIFF = '차액';
     const COL_PERSON = '담당자';
-    const COL_REQUIRED = '필수여부';
+    const COL_REQUIRED = '필수여부'; 
 
-    let allData = []; // 원본 데이터를 저장할 전역 변수
+    let allData = []; 
     let headers = [];
 
-    // 1. 데이터 파싱
     Papa.parse(csvUrl, {
         download: true,
         header: true,
         complete: function(results) {
-            // 빈 행 제거
             allData = results.data.filter(row => Object.keys(row).length > 0 && Object.values(row)[0] !== "");
             if(allData.length > 0) {
                 headers = Object.keys(allData[0]);
                 initGlobalFilters();
                 renderTableHeader();
-                applyFilters(); // 초기 필터링(전체 데이터) 적용 및 렌더링
+                applyFilters(); 
             }
         },
         error: function(error) {
@@ -165,9 +223,7 @@
         }
     });
 
-    // 2. 글로벌 필터(담당자, 필수품목) 드롭다운 초기 세팅
     function initGlobalFilters() {
-        // 담당자 고유값 추출
         const persons = [...new Set(allData.map(r => r[COL_PERSON]).filter(v => v))];
         const personSelect = document.getElementById('filterPerson');
         persons.forEach(p => {
@@ -176,7 +232,6 @@
             personSelect.appendChild(opt);
         });
 
-        // 필수여부 고유값 추출
         const reqs = [...new Set(allData.map(r => r[COL_REQUIRED]).filter(v => v))];
         const reqSelect = document.getElementById('filterRequired');
         reqs.forEach(r => {
@@ -186,7 +241,6 @@
         });
     }
 
-    // 3. 테이블 헤더(및 개별 검색창) 렌더링
     function renderTableHeader() {
         const thead = document.getElementById('tableHead');
         const trHead = document.createElement('tr');
@@ -200,7 +254,7 @@
             input.className = 'filter-input';
             input.placeholder = h + ' 검색';
             input.dataset.colName = h;
-            input.addEventListener('keyup', applyFilters); // 키보드 입력 시 통합 필터 실행
+            input.addEventListener('keyup', applyFilters); 
 
             th.appendChild(document.createElement('br'));
             th.appendChild(input);
@@ -209,25 +263,20 @@
         thead.appendChild(trHead);
     }
 
-    // 4. 🔥 핵심: 모든 필터(드롭다운 + 개별검색)를 종합하여 데이터 추려내기
     function applyFilters() {
         const personVal = document.getElementById('filterPerson').value;
         const reqVal = document.getElementById('filterRequired').value;
 
-        // 개별 컬럼 검색창의 값 가져오기
         const inputs = document.querySelectorAll('.filter-input');
         const colFilters = Array.from(inputs).map(inp => ({
             col: inp.dataset.colName,
             val: inp.value.toLowerCase().trim()
         }));
 
-        // 데이터 필터링 실행
         const filteredData = allData.filter(row => {
-            // 4-1. 상단 글로벌 필터(드롭다운) 조건 확인
             if (personVal && row[COL_PERSON] !== personVal) return false;
             if (reqVal && row[COL_REQUIRED] !== reqVal) return false;
 
-            // 4-2. 표 머리글 개별 검색 조건 확인
             for (let f of colFilters) {
                 if (f.val) {
                     const cellVal = (row[f.col] || '').toLowerCase();
@@ -237,47 +286,54 @@
             return true;
         });
 
-        // 필터링된 데이터로 통계치 업데이트 및 테이블 본문 렌더링
         updateSummary(filteredData);
         renderTableBody(filteredData);
     }
 
-    // 5. 우세/열세/동일 요약 통계 계산 (차액 기준)
     function updateSummary(data) {
         let win = 0, lose = 0, tie = 0;
+        let reqCounts = {}; 
 
         data.forEach(row => {
             let diff = 0;
-            
-            // 시트에 '차액' 컬럼이 있으면 우선 사용, 없으면 '자사가격 - 최저가'를 직접 계산
             if(row[COL_DIFF] !== undefined && row[COL_DIFF] !== '') {
-                // 숫자와 마이너스(-) 기호만 남기고 파싱
                 diff = Number(row[COL_DIFF].replace(/[^0-9.-]+/g, ""));
             } else {
                 let ourPrice = Number((row[COL_OUR_PRICE] || '0').replace(/[^0-9.-]+/g, ""));
                 let netPrice = Number((row[COL_NET_PRICE] || '0').replace(/[^0-9.-]+/g, ""));
-                // 단, 둘 다 0이 아닐 때만 유효한 데이터로 간주
-                if (ourPrice > 0 || netPrice > 0) {
-                    diff = ourPrice - netPrice;
-                }
+                if (ourPrice > 0 || netPrice > 0) diff = ourPrice - netPrice;
             }
 
-            // 요청하신 로직: 차액이 마이너스(-)면 우세, 플러스(+)면 열세, 0이면 동일
             if(diff < 0) win++;
             else if(diff > 0) lose++;
             else tie++;
+
+            let reqType = row[COL_REQUIRED] || '미지정';
+            reqCounts[reqType] = (reqCounts[reqType] || 0) + 1;
         });
 
         document.getElementById('kpiTotal').textContent = data.length + "건";
         document.getElementById('kpiWin').textContent = win + "건";
         document.getElementById('kpiLose').textContent = lose + "건";
         document.getElementById('kpiTie').textContent = tie + "건";
+
+        const titleEl = document.getElementById('tableTitle');
+        const reqString = Object.entries(reqCounts)
+            .filter(([key]) => key !== '미지정' && key !== '') 
+            .sort((a, b) => b[1] - a[1]) 
+            .map(([key, val]) => `${key} ${val}건`)
+            .join(' / ');
+
+        if (reqString.length > 0) {
+            titleEl.innerHTML = `데이터 상세 <span class="summary-badge">(현재 조건: ${reqString})</span>`;
+        } else {
+            titleEl.innerHTML = `데이터 상세`;
+        }
     }
 
-    // 6. 필터링된 데이터로 테이블 본문 그리기
     function renderTableBody(data) {
         const tbody = document.getElementById('tableBody');
-        tbody.innerHTML = ''; // 기존 내용 지우기
+        tbody.innerHTML = ''; 
 
         data.forEach(row => {
             const tr = document.createElement('tr');
