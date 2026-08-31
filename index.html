@@ -8,32 +8,12 @@
     <script src="https://cdnjs.cloudflare.com/ajax/libs/PapaParse/5.3.2/papaparse.min.js"></script>
     <style>
         * { box-sizing: border-box; }
-        
-        body { 
-            font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif; 
-            background-color: #f8f9fa; 
-            margin: 0; 
-            padding: 20px; 
-            color: #333; 
-            height: 100vh; 
-            display: flex;
-            flex-direction: column;
-            overflow: hidden; 
-        }
-        
-        .container { 
-            width: 100%; display: flex; flex-direction: column; flex: 1; min-height: 0; 
-        }
-        
-        .card { 
-            background: white; border-radius: 12px; padding: 24px; box-shadow: 0 4px 6px rgba(0,0,0,0.05); 
-        }
-        
+        body { font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif; background-color: #f8f9fa; margin: 0; padding: 20px; color: #333; height: 100vh; display: flex; flex-direction: column; overflow: hidden; }
+        .container { width: 100%; display: flex; flex-direction: column; flex: 1; min-height: 0; }
+        .card { background: white; border-radius: 12px; padding: 24px; box-shadow: 0 4px 6px rgba(0,0,0,0.05); }
         .kpi-card { flex-shrink: 0; margin-bottom: 20px; }
         .table-card { flex: 1; display: flex; flex-direction: column; min-height: 0; margin-bottom: 0; }
-        
         h1 { margin-top: 0; font-size: 24px; color: #111; margin-bottom: 20px; }
-        
         .summary-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(220px, 1fr)); gap: 16px; }
         .kpi-box { background-color: #f8f9fa; border: 1px solid #e9ecef; border-radius: 8px; padding: 16px; display: flex; flex-direction: column; }
         .kpi-title { font-size: 13px; color: #6c757d; font-weight: 600; margin-bottom: 10px; }
@@ -41,50 +21,20 @@
         .kpi-list { font-size: 13px; color: #495057; line-height: 1.5; margin: 0; padding: 0; list-style: none; }
         .kpi-list li { display: flex; justify-content: space-between; border-bottom: 1px dashed #dee2e6; padding: 4px 0; }
         .kpi-list li:last-child { border-bottom: none; }
-
         .text-blue { color: #3b82f6; }
         .text-red { color: #ef4444; }
-
         .global-select { width: 100%; padding: 8px; border: 1px solid #ced4da; border-radius: 6px; font-size: 14px; outline: none; background-color: white; cursor: pointer; margin-top: auto; }
         .global-select:focus { border-color: #3b82f6; }
-
-        .table-responsive { 
-            width: 100%; flex: 1; overflow: auto; border: 1px solid #e9ecef; border-radius: 4px; min-height: 0;
-        }
-        
-        /* 🔥 수정된 부분 1: 테이블과 셀에서 줄바꿈(nowrap) 금지 해제 */
-        table { 
-            width: 100%; border-collapse: separate; border-spacing: 0; font-size: 14px; 
-            /* white-space: nowrap 삭제됨 */
-        }
-        th, td { 
-            padding: 12px 15px; border-bottom: 1px solid #eee; border-right: 1px solid #eee; text-align: left; 
-            /* 너비가 줄어들면 강제로 줄바꿈되도록 설정 */
-            white-space: normal; 
-            word-break: break-word; 
-        }
+        .table-responsive { width: 100%; flex: 1; overflow: auto; border: 1px solid #e9ecef; border-radius: 4px; min-height: 0; }
+        table { width: 100%; border-collapse: separate; border-spacing: 0; font-size: 14px; }
+        th, td { padding: 12px 15px; border-bottom: 1px solid #eee; border-right: 1px solid #eee; text-align: left; white-space: normal; word-break: break-word; }
         td:last-child, th:last-child { border-right: none; }
-        
-        thead th { 
-            position: sticky !important; 
-            top: 0; 
-            background-color: #f1f3f5; 
-            font-weight: 600; 
-            color: #495057; 
-            vertical-align: top; 
-            z-index: 10; 
-            box-shadow: 0 2px 2px -1px rgba(0, 0, 0, 0.1); 
-            position: relative; 
-        }
+        thead th { position: sticky !important; top: 0; background-color: #f1f3f5; font-weight: 600; color: #495057; vertical-align: top; z-index: 10; box-shadow: 0 2px 2px -1px rgba(0, 0, 0, 0.1); position: relative; }
         tr:hover td { background-color: #f8f9fa; }
-
         .filter-input { width: 100%; padding: 6px 8px; margin-top: 8px; border: 1px solid #ccc; border-radius: 4px; font-size: 13px; outline: none; }
         .filter-input:focus { border-color: #3b82f6; }
         .summary-badge { font-size: 14px; color: #6366f1; font-weight: normal; margin-left: 10px; }
-
-        .resizer {
-            position: absolute; top: 0; right: 0; width: 6px; height: 100%; cursor: col-resize; user-select: none; background-color: transparent; z-index: 11;
-        }
+        .resizer { position: absolute; top: 0; right: 0; width: 6px; height: 100%; cursor: col-resize; user-select: none; background-color: transparent; z-index: 11; }
         .resizer:hover, .resizer.resizing { background-color: #3b82f6; }
         body.resizing-active { user-select: none; cursor: col-resize; }
     </style>
@@ -137,6 +87,7 @@
     const sheetId = '1nA0ZtCztY6Qe8UR8-erB98_BIZDYUUjpIQYWNyuePWA';
     const csvUrl = `https://docs.google.com/spreadsheets/d/${sheetId}/export?format=csv&gid=0`;
 
+    // 단일 행 열 이름 (그대로 유지)
     const COL_OUR_PRICE = '자사가격';
     const COL_NET_PRICE = '최저가';
     const COL_DIFF = '차액';
@@ -146,17 +97,52 @@
     let allData = []; 
     let headers = [];
 
+    // 🔥 수정된 부분: header 옵션을 false로 변경하여 2차원 배열로 데이터를 읽어옵니다.
     Papa.parse(csvUrl, {
         download: true,
-        header: true,
+        header: false, 
         complete: function(results) {
-            allData = results.data.filter(row => Object.keys(row).length > 0 && Object.values(row)[0] !== "");
-            if(allData.length > 0) {
-                headers = Object.keys(allData[0]);
-                initGlobalFilters();
-                renderTableHeader();
-                applyFilters(); 
+            const rawData = results.data.filter(row => row.length > 0 && row.some(cell => cell !== ""));
+            if(rawData.length < 2) return;
+
+            // 1. 1행(큰 제목)과 2행(소제목)을 분석하여 병합 헤더 복구
+            const row1 = rawData[0];
+            const row2 = rawData[1];
+            let combinedHeaders = [];
+            let lastHeader = "";
+
+            for(let i = 0; i < row1.length; i++) {
+                let top = row1[i] ? row1[i].trim() : "";
+                let bottom = row2[i] ? row2[i].trim() : "";
+
+                // 병합된 셀 처리: 1행 값이 있으면 업데이트, 없으면 이전 제목 유지
+                if(top !== "") {
+                    lastHeader = top;
+                }
+
+                if(bottom !== "" && bottom !== top) {
+                    // 2행에 소제목이 따로 있는 경우 (예: "판매 수량(재고단위)")
+                    combinedHeaders.push(lastHeader ? `${lastHeader} ${bottom}` : bottom);
+                } else {
+                    // 소제목이 없거나 위아래가 같은 경우
+                    combinedHeaders.push(lastHeader || bottom || `열_${i}`);
+                }
             }
+            headers = combinedHeaders;
+
+            // 2. 3번째 행(인덱스 2)부터 실제 데이터 객체로 변환
+            allData = [];
+            for(let r = 2; r < rawData.length; r++) {
+                let obj = {};
+                for(let c = 0; c < headers.length; c++) {
+                    obj[headers[c]] = rawData[r][c] || "";
+                }
+                allData.push(obj);
+            }
+
+            initGlobalFilters();
+            renderTableHeader();
+            applyFilters(); 
         },
         error: function(error) {
             console.error("데이터 로드 실패:", error);
@@ -210,7 +196,6 @@
         thead.appendChild(trHead);
     }
 
-    // 🔥 수정된 부분 2: 자바스크립트 크기 조절 시 강제로 maxWidth 적용
     function createResizableColumn(th, resizer) {
         let x = 0;
         let w = 0;
@@ -229,9 +214,8 @@
 
         const mouseMoveHandler = function(e) {
             const dx = e.clientX - x; 
-            const newWidth = Math.max(50, w + dx); // 최소 너비 50px 보장
+            const newWidth = Math.max(50, w + dx); 
             
-            // width, minWidth, maxWidth를 모두 동일하게 설정하여 강제로 줄임
             th.style.width = `${newWidth}px`;
             th.style.minWidth = `${newWidth}px`;
             th.style.maxWidth = `${newWidth}px`;
