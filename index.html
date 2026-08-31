@@ -1,19 +1,53 @@
-<!DOCTYPE html>
-<html>
-<head>
-    <meta charset="UTF-8">
-    <title>자동 캡처 테스트</title>
-    <style>
-        body { text-align: center; padding: 50px; font-family: sans-serif; background-color: #f0f4f8; }
-        img { max-width: 100%; border-radius: 10px; box-shadow: 0 4px 8px rgba(0,0,0,0.2); margin-top: 20px; }
-    </style>
-</head>
-<body>
-    <h1>자동 로그인 & 캡처 화면 📸</h1>
-    <p>파이썬 봇이 캡처한 최신 이미지가 아래에 표시됩니다.</p>
+import streamlit as st
+import pandas as pd
+
+# 페이지 기본 설정
+st.set_page_config(page_title="가격 비교 대시보드", layout="wide")
+
+st.title("📊 자사 vs 인터넷 최저가 가격 비교 대시보드")
+st.write("구글 스프레드시트의 데이터를 실시간으로 불러와 대시보드 형태로 보여줍니다.")
+
+# 1. 구글 스프레드시트 데이터 불러오기 (캐싱하여 속도 향상)
+@st.cache_data
+def load_data():
+    # 공유해주신 구글 시트의 CSV 내보내기 링크
+    sheet_id = '1nA0ZtCztY6Qe8UR8-erB98_BIZDYUUjpIQYWNyuePWA'
+    csv_url = f"https://docs.google.com/spreadsheets/d/{sheet_id}/export?format=csv&gid=0"
     
-    <!-- 바로 이 한 줄이 캡처 이미지를 불러오는 핵심 코드입니다 -->
-    <img src="capture.png" alt="로그인 캡처 화면">
+    # pandas로 CSV 데이터 읽기
+    df = pd.read_csv(csv_url)
+    return df
+
+try:
+    df = load_data()
     
-</body>
-</html>
+    # 2. 요약 지표 (KPI) 보여주기
+    st.subheader("💡 요약 지표")
+    col1, col2, col3 = st.columns(3)
+    col1.metric("총 등록 상품 수", f"{len(df)} 개")
+    
+    # (주의: 시트의 실제 열 이름이 '자사가격', '최저가' 등이 아닐 경우 아래 코드를 수정해야 합니다)
+    # 예시용으로 열 이름이 존재한다고 가정하고 차이값을 계산합니다.
+    if '자사가격' in df.columns and '최저가' in df.columns:
+        df['가격차이'] = df['자사가격'] - df['최저가']
+        cheaper_count = len(df[df['가격차이'] <= 0])
+        col2.metric("자사가 더 저렴한 상품 수", f"{cheaper_count} 개")
+        col3.metric("평균 가격 차이", f"{int(df['가격차이'].mean())} 원")
+    
+    st.divider()
+
+    # 3. 차트로 데이터 시각화하기
+    st.subheader("📈 상품별 가격 비교 차트")
+    # '상품명'을 인덱스로 설정하여 바 차트 그리기 (열 이름은 실제 시트에 맞게 수정하세요)
+    if '상품명' in df.columns and '자사가격' in df.columns and '최저가' in df.columns:
+        chart_data = df.set_index('상품명')[['자사가격', '최저가']]
+        st.bar_chart(chart_data)
+    else:
+        st.info("시트에 '상품명', '자사가격', '최저가' 열(Column)이 있으면 차트가 자동으로 생성됩니다.")
+
+    # 4. 원본 데이터 표(Table)로 보기
+    st.subheader("📋 전체 데이터 상세")
+    st.dataframe(df, use_container_width=True)
+
+except Exception as e:
+    st.error(f"데이터를 불러오는 중 오류가 발생했습니다. 구글 시트 공유 권한이나 링크를 확인해주세요.\n오류내용: {e}")
