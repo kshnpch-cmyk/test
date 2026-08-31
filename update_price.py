@@ -1,102 +1,51 @@
 import os
 import json
 import time
-import re
+import requests
 import gspread
 from google.oauth2.credentials import Credentials
 from google.auth.transport.requests import Request
 
-from selenium import webdriver
-from selenium.webdriver.chrome.service import Service
-from selenium.webdriver.chrome.options import Options
-from selenium.webdriver.common.by import By
-from webdriver_manager.chrome import ChromeDriverManager
-from bs4 import BeautifulSoup
-
-def get_chrome_driver():
-    """봇 감지를 회피하는 헤드리스 크롬 드라이버 생성"""
-    chrome_options = Options()
-    chrome_options.add_argument("--headless=new") # 화면 없이 실행
-    chrome_options.add_argument("--no-sandbox")
-    chrome_options.add_argument("--disable-dev-shm-usage")
-    chrome_options.add_argument("--disable-gpu")
-    chrome_options.add_argument("--window-size=1920,1080")
-    chrome_options.add_argument("--lang=ko-KR")
-    chrome_options.add_argument("user-agent=Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/123.0.0.0 Safari/537.36")
+def fetch_naver_price_debug(search_query):
+    """
+    네이버 쇼핑에 검색을 요청하고,
+    응답 상태 및 수신받은 실제 내용을 진단 로그로 출력합니다.
+    """
+    print(f"  [디버그] 🔎 네이버 검색 요청 키워드: '{search_query}'")
     
-    # 봇 감지 우회 설정
-    chrome_options.add_experimental_option("excludeSwitches", ["enable-automation"])
-    chrome_options.add_experimental_option('useAutomationExtension', False)
+    headers = {
+        "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/123.0.0.0 Safari/537.36",
+        "Accept-Language": "ko-KR,ko;q=0.9"
+    }
     
-    service = Service(ChromeDriverManager().install())
-    driver = webdriver.Chrome(service=service, options=chrome_options)
-    driver.execute_script("Object.defineProperty(navigator, 'webdriver', {get: () => undefined})")
-    return driver
-
-def fetch_naver_price_selenium(driver, search_query):
-    """셀레니움을 활용하여 네이버 쇼핑 수집"""
-    print(f"🔍 검색 시도: [{search_query}]")
-    url = f"https://search.shopping.naver.com/search/all?query={search_query}"
+    encoded_query = requests.utils.quote(search_query)
+    search_url = f"https://search.shopping.naver.com/search/all?query={encoded_query}"
     
     try:
-        driver.get(url)
-        time.sleep(3.0) # 페이지 로딩 완료 대기
+        response = requests.get(search_url, headers=headers, timeout=10)
+        print(f"  [디버그] 📡 네이버 응답 상태 코드: {response.status_code}")
         
-        # 스크롤을 약간 내려서 동적 데이터 불러오기
-        driver.execute_script("window.scrollTo(0, 500);")
-        time.sleep(1.0)
-        
-        soup = BeautifulSoup(driver.page_source, 'html.parser')
-        
-        # 네이버 쇼핑 상품 아이템 감지
-        first_product = (
-            soup.select_one("div[class*='product_item']") or 
-            soup.select_one("li[class*='basicList_item']") or
-            soup.select_one("div[class*='adProduct_item']")
-        )
-        
-        if first_product:
-            # 1. 판매채널 (J열)
-            channel_el = (
-                first_product.select_one("[class*='product_mall']") or 
-                first_product.select_one("[class*='basicList_mall']") or
-                first_product.select_one("[class*='product_link']")
-            )
-            channel_name = channel_el.text.strip() if channel_el else "네이버쇼핑"
+        if response.status_code == 200:
+            html_text = response.text
+            print(f"  [디버그] 📄 응답받은 HTML 전체 길이: {len(html_text)} 글자")
             
-            # 2. 판매가 (K열)
-            price_el = (
-                first_product.select_one("[class*='price_num']") or 
-                first_product.select_one("[class*='price_price']") or
-                first_product.select_one("span[class*='price']")
-            )
-            if price_el:
-                price_nums = re.findall(r'\d+', price_el.text.replace(",", ""))
-                sale_price = int("".join(price_nums)) if price_nums else 0
-            else:
-                sale_price = 0
+            # 차단 여부 확인 (CAPTCHA나 차단 안내가 포함되었는지)
+            if "captcha" in html_text.lower() or "blocked" in html_text.lower():
+                print("  [디버그] ⚠️ 네이버에서 봇(Bot) 차단 페이지를 반환했습니다.")
+                return "네이버차단", 0, "-"
             
-            # 3. 배송비 (L열)
-            delivery_el = (
-                first_product.select_one("[class*='price_delivery']") or 
-                first_product.select_one("[class*='basicList_delivery']")
-            )
-            if delivery_el:
-                delivery_text = delivery_el.text.strip()
-                if "무료" in delivery_text:
-                    shipping_fee = "무료배송"
-                else:
-                    nums = re.findall(r'\d+', delivery_text.replace(",", ""))
-                    shipping_fee = int(nums[0]) if nums else delivery_text
+            # HTML 내부에서 상품 정보 키워드가 존재하는지 체크
+            if "product_item" in html_text or "basicList_item" in html_text or "price_num" in html_text:
+                print("  [디버그] ✅ 네이버 응답 본문에서 상품 목록 HTML 태그를 발견했습니다!")
             else:
-                shipping_fee = "기본배송"
-
-            return channel_name, sale_price, shipping_fee
-
+                print("  [디버그] ❌ 네이버 응답 본문에 상품 목록 태그가 존재하지 않습니다. (검색어 미매칭 또는 구조 변경)")
+                # 응답 본문 앞부분 300자 출력해보기
+                print(f"  [디버그] 📝 HTML 본문 미리보기:\n{html_text[:300]}...")
+                
     except Exception as e:
-        print(f"  └─ 에러 발생: {e}")
+        print(f"  [디버그] ❌ 네트워크/크롤링 에러 발생: {e}")
 
-    return None, None, None
+    return "검색결과없음", 0, "-"
 
 def run_price_update():
     try:
@@ -113,7 +62,7 @@ def run_price_update():
         credentials._scopes = None
 
         if credentials.expired and credentials.refresh_token:
-            print("🔄 토큰 갱신 중...")
+            print("🔄 구글 토큰 갱신 중...")
             credentials.refresh(Request())
 
         gc = gspread.authorize(credentials)
@@ -123,61 +72,54 @@ def run_price_update():
         doc = gc.open_by_url(sheet_url)
         worksheet = doc.get_worksheet(0)
 
-        # 3. 셀레니움 드라이버 시작
-        print("🌐 브라우저(Headless Chrome)를 가동합니다...")
-        driver = get_chrome_driver()
-
-        print("📊 3행부터 10행까지 가격 조사를 진행합니다...\n")
+        print("==================================================")
+        print("📊 [시트 진단 시작] 3행부터 10행까지 데이터를 확인합니다.")
+        print("==================================================\n")
 
         for row_num in range(3, 11):
             row_values = worksheet.row_values(row_num)
+            
+            # 각 열의 읽어온 진짜 데이터 출력
+            print(f"▶ [{row_num}행] 전체 읽어온 값 (총 {len(row_values)}개 열): {row_values}")
             
             category = row_values[1] if len(row_values) >= 2 else ""      # B열: 구분
             product_name = row_values[2] if len(row_values) >= 3 else ""  # C열: 품목명
             spec = row_values[3] if len(row_values) >= 4 else ""          # D열: 규격
             note = row_values[13] if len(row_values) >= 14 else ""        # N열: 특이사항
 
-            # 예외 조건 체크 ('전용', '예산', '종료'가 구분 항목에 들어있으면 건너뜀)
+            print(f"  ├─ 구분(B열): '{category}'")
+            print(f"  ├─ 품목명(C열): '{product_name}'")
+            print(f"  ├─ 규격(D열): '{spec}'")
+            print(f"  └─ 특이사항(N열): '{note}'")
+
+            # 예외 조건 체크
             if any(skip_word in category for skip_word in ['전용', '예산', '종료']):
-                print(f"⏭️ [{row_num}행] 스킵됨 (구분 조건 제외: '{category}')")
+                print(f"  ⏭️ 스킵됨: '구분' 항목에 제외 단어('{category}')가 포함되어 있습니다.\n")
                 continue
 
             if not product_name.strip():
-                print(f"⏭️ [{row_num}행] 스킵됨 (품목명 없음)")
+                print(f"  ⏭️ 스킵됨: 품목명(C열)이 비어있습니다.\n")
                 continue
 
-            # 1차 시도: C열 + D열 + N열
+            # 검색 키워드 조합
             full_query = " ".join([k.strip() for k in [product_name, spec, note] if k.strip()])
-            channel, price, shipping = fetch_naver_price_selenium(driver, full_query)
+            
+            # 네이버 진단 검색
+            channel, price, shipping = fetch_naver_price_debug(full_query)
 
-            # 2차 시도 (실패 시): C열 + D열
-            if not channel and note.strip():
-                short_query = " ".join([k.strip() for k in [product_name, spec] if k.strip()])
-                print(f"  └─ ⚠️ 1차 실패 후 2차 재검색: [{short_query}]")
-                channel, price, shipping = fetch_naver_price_selenium(driver, short_query)
-
-            # 3차 시도 (실패 시): C열
-            if not channel and spec.strip():
-                basic_query = product_name.strip()
-                print(f"  └─ ⚠️ 2차 실패 후 3차 재검색: [{basic_query}]")
-                channel, price, shipping = fetch_naver_price_selenium(driver, basic_query)
-
-            if not channel:
-                channel, price, shipping = "검색결과없음", 0, "-"
-
-            # 시트 업데이트
+            # 시트 업데이트 테스트
             worksheet.update_cell(row_num, 10, channel)   # J열
             worksheet.update_cell(row_num, 11, price)     # K열
             worksheet.update_cell(row_num, 12, shipping)  # L열
 
-            print(f"  └─ ✅ [{row_num}행 결과] J(채널): {channel} | K(가격): {price}원 | L(택배비): {shipping}\n")
+            print(f"  ✔ [{row_num}행 완료] J={channel} | K={price} | L={shipping}\n")
+            time.sleep(1.5)
 
-        # 드라이버 종료
-        driver.quit()
-        print("🎉 3행~10행 가격 수집 및 시트 업데이트 완료!")
+        print("==================================================")
+        print("🎉 진단 작업 완료!")
 
     except Exception as e:
-        print(f"❌ 오류 발생: {str(e)}")
+        print(f"❌ 전체 로직 중 오류 발생: {str(e)}")
         raise e
 
 if __name__ == "__main__":
