@@ -36,34 +36,13 @@
             box-shadow: 0 4px 6px rgba(0,0,0,0.05); 
         }
         
-        .kpi-card {
-            flex-shrink: 0;
-            margin-bottom: 20px;
-        }
-
-        .table-card {
-            flex: 1;
-            display: flex;
-            flex-direction: column;
-            min-height: 0;
-            margin-bottom: 0;
-        }
-
+        .kpi-card { flex-shrink: 0; margin-bottom: 20px; }
+        .table-card { flex: 1; display: flex; flex-direction: column; min-height: 0; margin-bottom: 0; }
+        
         h1 { margin-top: 0; font-size: 24px; color: #111; margin-bottom: 20px; }
         
-        .summary-grid {
-            display: grid;
-            grid-template-columns: repeat(auto-fit, minmax(220px, 1fr));
-            gap: 16px;
-        }
-        .kpi-box {
-            background-color: #f8f9fa;
-            border: 1px solid #e9ecef;
-            border-radius: 8px;
-            padding: 16px;
-            display: flex;
-            flex-direction: column;
-        }
+        .summary-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(220px, 1fr)); gap: 16px; }
+        .kpi-box { background-color: #f8f9fa; border: 1px solid #e9ecef; border-radius: 8px; padding: 16px; display: flex; flex-direction: column; }
         .kpi-title { font-size: 13px; color: #6c757d; font-weight: 600; margin-bottom: 10px; }
         .kpi-value { font-size: 24px; font-weight: bold; color: #212529; margin-bottom: 12px; }
         .kpi-list { font-size: 13px; color: #495057; line-height: 1.5; margin: 0; padding: 0; list-style: none; }
@@ -73,42 +52,21 @@
         .text-blue { color: #3b82f6; }
         .text-red { color: #ef4444; }
 
-        .global-select {
-            width: 100%;
-            padding: 8px;
-            border: 1px solid #ced4da;
-            border-radius: 6px;
-            font-size: 14px;
-            outline: none;
-            background-color: white;
-            cursor: pointer;
-            margin-top: auto;
-        }
+        .global-select { width: 100%; padding: 8px; border: 1px solid #ced4da; border-radius: 6px; font-size: 14px; outline: none; background-color: white; cursor: pointer; margin-top: auto; }
         .global-select:focus { border-color: #3b82f6; }
 
         .table-responsive { 
-            width: 100%; 
-            flex: 1;       
-            overflow: auto; 
-            border: 1px solid #e9ecef;
-            border-radius: 4px;
-            min-height: 0;
+            width: 100%; flex: 1; overflow: auto; border: 1px solid #e9ecef; border-radius: 4px; min-height: 0;
         }
         table { 
-            width: 100%; 
-            border-collapse: separate; 
-            border-spacing: 0;
-            font-size: 14px; 
-            white-space: nowrap; 
+            width: 100%; border-collapse: separate; border-spacing: 0; font-size: 14px; white-space: nowrap; 
         }
         th, td { 
-            padding: 12px 15px; 
-            border-bottom: 1px solid #eee; 
-            border-right: 1px solid #eee; 
-            text-align: left; 
+            padding: 12px 15px; border-bottom: 1px solid #eee; border-right: 1px solid #eee; text-align: left; 
         }
         td:last-child, th:last-child { border-right: none; }
         
+        /* 테이블 헤더(고정) 설정 */
         thead th { 
             position: sticky; 
             top: 0; 
@@ -118,36 +76,49 @@
             vertical-align: top; 
             z-index: 10; 
             box-shadow: 0 2px 2px -1px rgba(0, 0, 0, 0.1); 
+            /* 🔥 리사이저 배치를 위해 relative 추가 */
+            position: relative; 
         }
+        /* sticky와 relative를 동시 적용하기 위해 상단 고정 방식 보완 */
+        thead th { position: sticky !important; }
         tr:hover td { background-color: #f8f9fa; }
 
-        .filter-input {
-            width: 100%; padding: 6px 8px; margin-top: 8px;
-            border: 1px solid #ccc; border-radius: 4px; font-size: 13px; outline: none;
-        }
+        .filter-input { width: 100%; padding: 6px 8px; margin-top: 8px; border: 1px solid #ccc; border-radius: 4px; font-size: 13px; outline: none; }
         .filter-input:focus { border-color: #3b82f6; }
+        .summary-badge { font-size: 14px; color: #6366f1; font-weight: normal; margin-left: 10px; }
 
-        .summary-badge {
-            font-size: 14px;
-            color: #6366f1;
-            font-weight: normal;
-            margin-left: 10px;
+        /* 🔥 컬럼 사이즈 조절 핸들러 (리사이저) 스타일 */
+        .resizer {
+            position: absolute;
+            top: 0;
+            right: 0;
+            width: 6px;
+            height: 100%;
+            cursor: col-resize;
+            user-select: none;
+            background-color: transparent;
+            z-index: 11;
+        }
+        .resizer:hover, .resizer.resizing {
+            background-color: #3b82f6; /* 드래그 시 파란색 구분선 표시 */
+        }
+        /* 드래그 도중 전체 텍스트 선택 방지 */
+        body.resizing-active {
+            user-select: none;
+            cursor: col-resize;
         }
     </style>
 </head>
 <body>
 
 <div class="container">
-    <!-- 상단 요약 카드 -->
     <div class="card kpi-card">
         <h1>📊 실시간 가격 경쟁력 현황</h1>
-        
         <div class="summary-grid">
             <div class="kpi-box">
                 <div class="kpi-title">📦 조회된 품목 수</div>
                 <div class="kpi-value" id="kpiTotal">0건</div>
             </div>
-            
             <div class="kpi-box">
                 <div class="kpi-title">💰 가격 경쟁력 (차액 기준)</div>
                 <ul class="kpi-list">
@@ -156,14 +127,12 @@
                     <li><span>동일가격 (차액 0)</span> <strong id="kpiTie">0건</strong></li>
                 </ul>
             </div>
-            
             <div class="kpi-box">
                 <div class="kpi-title">👤 담당자 필터 (관리자1 기준)</div>
                 <select id="filterPerson" class="global-select" onchange="applyFilters()">
                     <option value="">모든 담당자 보기</option>
                 </select>
             </div>
-            
             <div class="kpi-box">
                 <div class="kpi-title">⭐ 필수/권장 필터</div>
                 <select id="filterRequired" class="global-select" onchange="applyFilters()">
@@ -173,10 +142,8 @@
         </div>
     </div>
 
-    <!-- 하단 표 카드 -->
     <div class="card table-card">
         <h2 id="tableTitle" style="margin-top:0; margin-bottom:15px; font-size: 18px;">데이터 상세</h2>
-        
         <div class="table-responsive">
             <table id="dataTable">
                 <thead id="tableHead"></thead>
@@ -190,12 +157,11 @@
     const sheetId = '1nA0ZtCztY6Qe8UR8-erB98_BIZDYUUjpIQYWNyuePWA';
     const csvUrl = `https://docs.google.com/spreadsheets/d/${sheetId}/export?format=csv&gid=0`;
 
-    // 🔥 요청하신 내용에 맞춰 타겟 열(Column) 이름을 수정했습니다.
     const COL_OUR_PRICE = '자사가격';
     const COL_NET_PRICE = '최저가';
     const COL_DIFF = '차액';
-    const COL_PERSON = '관리자1';      // 변경됨: 관리자1 열 데이터 활용
-    const COL_REQUIRED = '필수/권장';  // 변경됨: 필수/권장 열 데이터 활용
+    const COL_PERSON = '관리자1';
+    const COL_REQUIRED = '필수/권장';
 
     let allData = []; 
     let headers = [];
@@ -218,9 +184,7 @@
         }
     });
 
-    // 드롭다운 필터 초기화 로직 (지정된 열의 고유값을 자동으로 가져옴)
     function initGlobalFilters() {
-        // 관리자1 열에서 중복 없는 이름 추출
         const persons = [...new Set(allData.map(r => r[COL_PERSON]).filter(v => v))];
         const personSelect = document.getElementById('filterPerson');
         persons.forEach(p => {
@@ -229,7 +193,6 @@
             personSelect.appendChild(opt);
         });
 
-        // 필수/권장 열에서 중복 없는 값 추출
         const reqs = [...new Set(allData.map(r => r[COL_REQUIRED]).filter(v => v))];
         const reqSelect = document.getElementById('filterRequired');
         reqs.forEach(r => {
@@ -256,9 +219,54 @@
 
             th.appendChild(document.createElement('br'));
             th.appendChild(input);
+            
+            // 🔥 컬럼 너비 조절용 요소(리사이저) 추가
+            const resizer = document.createElement('div');
+            resizer.className = 'resizer';
+            th.appendChild(resizer);
+            
+            // 드래그 기능 부착
+            createResizableColumn(th, resizer);
+
             trHead.appendChild(th);
         });
         thead.appendChild(trHead);
+    }
+
+    // 🔥 리사이즈(너비 조절) 구현 함수
+    function createResizableColumn(th, resizer) {
+        let x = 0;
+        let w = 0;
+
+        const mouseDownHandler = function(e) {
+            x = e.clientX; // 클릭한 마우스 X 좌표
+            const styles = window.getComputedStyle(th);
+            w = parseInt(styles.width, 10); // 현재 컬럼 너비
+
+            // 마우스 이동/클릭해제 이벤트 리스너 등록
+            document.addEventListener('mousemove', mouseMoveHandler);
+            document.addEventListener('mouseup', mouseUpHandler);
+
+            // 시각적 효과를 위한 클래스 추가
+            resizer.classList.add('resizing');
+            document.body.classList.add('resizing-active');
+        };
+
+        const mouseMoveHandler = function(e) {
+            const dx = e.clientX - x; // 마우스 이동 거리 계산
+            th.style.width = `${w + dx}px`;
+            th.style.minWidth = `${w + dx}px`;
+        };
+
+        const mouseUpHandler = function() {
+            // 이벤트 리스너 제거 및 효과 초기화
+            document.removeEventListener('mousemove', mouseMoveHandler);
+            document.removeEventListener('mouseup', mouseUpHandler);
+            resizer.classList.remove('resizing');
+            document.body.classList.remove('resizing-active');
+        };
+
+        resizer.addEventListener('mousedown', mouseDownHandler);
     }
 
     function applyFilters() {
@@ -272,11 +280,9 @@
         }));
 
         const filteredData = allData.filter(row => {
-            // 상단 드롭다운 필터 적용
             if (personVal && row[COL_PERSON] !== personVal) return false;
             if (reqVal && row[COL_REQUIRED] !== reqVal) return false;
 
-            // 표 헤더 개별 검색창 필터 적용
             for (let f of colFilters) {
                 if (f.val) {
                     const cellVal = (row[f.col] || '').toLowerCase();
