@@ -9,7 +9,6 @@
     <style>
         * { box-sizing: border-box; }
         
-        /* 🔥 1. body를 화면 높이(100vh)에 맞추고 전체 스크롤 숨김 */
         body { 
             font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif; 
             background-color: #f8f9fa; 
@@ -22,13 +21,12 @@
             overflow: hidden; 
         }
         
-        /* 🔥 2. 컨테이너가 남은 높이를 꽉 채우도록 설정 */
         .container { 
             width: 100%; 
             display: flex;
             flex-direction: column;
             flex: 1;
-            min-height: 0; /* Flex 자식 내부 스크롤을 위해 필수 */
+            min-height: 0; 
         }
         
         .card { 
@@ -38,13 +36,11 @@
             box-shadow: 0 4px 6px rgba(0,0,0,0.05); 
         }
         
-        /* 상단 요약 카드 (크기 고정) */
         .kpi-card {
             flex-shrink: 0;
             margin-bottom: 20px;
         }
 
-        /* 🔥 3. 하단 표 카드 (남은 공간을 모두 차지하도록 flex: 1 적용) */
         .table-card {
             flex: 1;
             display: flex;
@@ -55,7 +51,6 @@
 
         h1 { margin-top: 0; font-size: 24px; color: #111; margin-bottom: 20px; }
         
-        /* 요약 통계(KPI) 카드 스타일 */
         .summary-grid {
             display: grid;
             grid-template-columns: repeat(auto-fit, minmax(220px, 1fr));
@@ -91,11 +86,10 @@
         }
         .global-select:focus { border-color: #3b82f6; }
 
-        /* 🔥 4. 표를 감싸는 영역이 남은 공간을 채우고 스크롤 생성 */
         .table-responsive { 
             width: 100%; 
-            flex: 1;       /* 카드 안에서 남은 공간 꽉 채우기 */
-            overflow: auto; /* 내용이 넘치면 스크롤바 생성 */
+            flex: 1;       
+            overflow: auto; 
             border: 1px solid #e9ecef;
             border-radius: 4px;
             min-height: 0;
@@ -144,7 +138,7 @@
 <body>
 
 <div class="container">
-    <!-- 상단 요약 카드 (크기 고정, kpi-card 클래스 추가) -->
+    <!-- 상단 요약 카드 -->
     <div class="card kpi-card">
         <h1>📊 실시간 가격 경쟁력 현황</h1>
         
@@ -164,14 +158,14 @@
             </div>
             
             <div class="kpi-box">
-                <div class="kpi-title">👤 담당자 필터</div>
+                <div class="kpi-title">👤 담당자 필터 (관리자1 기준)</div>
                 <select id="filterPerson" class="global-select" onchange="applyFilters()">
                     <option value="">모든 담당자 보기</option>
                 </select>
             </div>
             
             <div class="kpi-box">
-                <div class="kpi-title">⭐ 필수품목 필터</div>
+                <div class="kpi-title">⭐ 필수/권장 필터</div>
                 <select id="filterRequired" class="global-select" onchange="applyFilters()">
                     <option value="">전체 품목 보기</option>
                 </select>
@@ -179,7 +173,7 @@
         </div>
     </div>
 
-    <!-- 하단 표 카드 (남은 공간 자동 채움, table-card 클래스 추가) -->
+    <!-- 하단 표 카드 -->
     <div class="card table-card">
         <h2 id="tableTitle" style="margin-top:0; margin-bottom:15px; font-size: 18px;">데이터 상세</h2>
         
@@ -196,11 +190,12 @@
     const sheetId = '1nA0ZtCztY6Qe8UR8-erB98_BIZDYUUjpIQYWNyuePWA';
     const csvUrl = `https://docs.google.com/spreadsheets/d/${sheetId}/export?format=csv&gid=0`;
 
+    // 🔥 요청하신 내용에 맞춰 타겟 열(Column) 이름을 수정했습니다.
     const COL_OUR_PRICE = '자사가격';
     const COL_NET_PRICE = '최저가';
     const COL_DIFF = '차액';
-    const COL_PERSON = '담당자';
-    const COL_REQUIRED = '필수여부'; 
+    const COL_PERSON = '관리자1';      // 변경됨: 관리자1 열 데이터 활용
+    const COL_REQUIRED = '필수/권장';  // 변경됨: 필수/권장 열 데이터 활용
 
     let allData = []; 
     let headers = [];
@@ -223,7 +218,9 @@
         }
     });
 
+    // 드롭다운 필터 초기화 로직 (지정된 열의 고유값을 자동으로 가져옴)
     function initGlobalFilters() {
+        // 관리자1 열에서 중복 없는 이름 추출
         const persons = [...new Set(allData.map(r => r[COL_PERSON]).filter(v => v))];
         const personSelect = document.getElementById('filterPerson');
         persons.forEach(p => {
@@ -232,6 +229,7 @@
             personSelect.appendChild(opt);
         });
 
+        // 필수/권장 열에서 중복 없는 값 추출
         const reqs = [...new Set(allData.map(r => r[COL_REQUIRED]).filter(v => v))];
         const reqSelect = document.getElementById('filterRequired');
         reqs.forEach(r => {
@@ -274,9 +272,11 @@
         }));
 
         const filteredData = allData.filter(row => {
+            // 상단 드롭다운 필터 적용
             if (personVal && row[COL_PERSON] !== personVal) return false;
             if (reqVal && row[COL_REQUIRED] !== reqVal) return false;
 
+            // 표 헤더 개별 검색창 필터 적용
             for (let f of colFilters) {
                 if (f.val) {
                     const cellVal = (row[f.col] || '').toLowerCase();
