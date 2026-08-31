@@ -8,7 +8,6 @@
     <script src="https://cdnjs.cloudflare.com/ajax/libs/PapaParse/5.3.2/papaparse.min.js"></script>
     <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
     <style>
-        /* 모든 요소에 box-sizing 적용하여 패딩으로 인한 너비 삐져나옴 방지 */
         * { box-sizing: border-box; }
         
         body { 
@@ -19,11 +18,7 @@
             color: #333; 
         }
         
-        /* 🔥 수정포인트 1: max-width 제한을 없애고 가로를 항상 창 크기(100%)에 맞춤 */
-        .container { 
-            width: 100%; 
-            margin: 0 auto; 
-        }
+        .container { width: 100%; margin: 0 auto; }
         
         .card { 
             background: white; 
@@ -34,27 +29,32 @@
         }
         
         h1 { margin-top: 0; font-size: 24px; color: #111; }
-        
-        /* 차트도 가로로 길게 퍼지도록 설정 */
         .chart-container { position: relative; height: 400px; width: 100%; }
         
-        /* 🔥 수정포인트 2: 표를 감싸는 영역 (가로 스크롤바 처리) */
-        .table-responsive {
-            width: 100%;
-            overflow-x: auto; /* 창이 좁을 때만 가로 스크롤 생성 */
-        }
+        .table-responsive { width: 100%; overflow-x: auto; }
         
-        /* 🔥 수정포인트 3: 테이블 너비 100% 및 텍스트 줄바꿈 방지 */
         table { 
             width: 100%; 
             border-collapse: collapse; 
             font-size: 14px; 
-            white-space: nowrap; /* 셀 안의 텍스트가 두 줄로 쪼개지지 않도록 방지 */
+            white-space: nowrap; 
         }
         
         th, td { padding: 12px 15px; border-bottom: 1px solid #eee; text-align: left; }
-        th { background-color: #f1f3f5; font-weight: 600; color: #495057; }
+        th { background-color: #f1f3f5; font-weight: 600; color: #495057; vertical-align: top; }
         tr:hover { background-color: #f8f9fa; }
+
+        /* 🔥 추가된 부분: 필터 입력창 스타일 */
+        .filter-input {
+            width: 100%;
+            padding: 6px 8px;
+            margin-top: 8px;
+            border: 1px solid #ccc;
+            border-radius: 4px;
+            font-size: 13px;
+            outline: none;
+        }
+        .filter-input:focus { border-color: #3b82f6; }
     </style>
 </head>
 <body>
@@ -73,7 +73,6 @@
 
     <div class="card">
         <h2 style="margin-top:0; font-size: 18px;">전체 데이터 상세</h2>
-        <!-- 테이블을 반응형 영역으로 감싸기 -->
         <div class="table-responsive">
             <table id="dataTable">
                 <thead id="tableHead"></thead>
@@ -84,7 +83,6 @@
 </div>
 
 <script>
-    // 구글 시트 CSV 내보내기 링크
     const sheetId = '1nA0ZtCztY6Qe8UR8-erB98_BIZDYUUjpIQYWNyuePWA';
     const csvUrl = `https://docs.google.com/spreadsheets/d/${sheetId}/export?format=csv&gid=0`;
 
@@ -107,15 +105,35 @@
         const headers = Object.keys(data[0]);
         
         const thead = document.getElementById('tableHead');
+        const tbody = document.getElementById('tableBody');
+        
+        // 초기화 (재렌더링 방지)
+        thead.innerHTML = '';
+        tbody.innerHTML = '';
+
+        // 1. 헤더 및 필터 입력창 생성
         const trHead = document.createElement('tr');
-        headers.forEach(h => {
+        headers.forEach((h, index) => {
             const th = document.createElement('th');
-            th.textContent = h;
+            th.textContent = h; // 컬럼명 텍스트
+
+            // 필터 검색창 추가
+            const input = document.createElement('input');
+            input.type = 'text';
+            input.className = 'filter-input';
+            input.placeholder = h + ' 검색';
+            input.dataset.colIndex = index;
+            
+            // 키보드 입력 시 필터링 함수 실행
+            input.addEventListener('keyup', filterTable);
+
+            th.appendChild(document.createElement('br')); // 줄바꿈
+            th.appendChild(input);
             trHead.appendChild(th);
         });
         thead.appendChild(trHead);
 
-        const tbody = document.getElementById('tableBody');
+        // 2. 테이블 본문 데이터 생성
         data.forEach(row => {
             const tr = document.createElement('tr');
             headers.forEach(h => {
@@ -125,6 +143,33 @@
             });
             tbody.appendChild(tr);
         });
+    }
+
+    // 🔥 추가된 부분: 테이블 필터링 로직
+    function filterTable() {
+        const inputs = document.querySelectorAll('.filter-input');
+        const filters = Array.from(inputs).map(input => input.value.toLowerCase().trim());
+        const tbody = document.getElementById('tableBody');
+        const rows = tbody.getElementsByTagName('tr');
+
+        for (let i = 0; i < rows.length; i++) {
+            const cells = rows[i].getElementsByTagName('td');
+            let displayRow = true;
+
+            for (let j = 0; j < filters.length; j++) {
+                const filterValue = filters[j];
+                // 검색어가 입력된 열(Column)에 대해서만 검사
+                if (filterValue) {
+                    const cellText = cells[j].textContent.toLowerCase();
+                    if (cellText.indexOf(filterValue) === -1) {
+                        displayRow = false;
+                        break; // 하나라도 조건에 안 맞으면 행 숨김 처리
+                    }
+                }
+            }
+            // 조건에 맞으면 보이고, 안 맞으면 숨기기
+            rows[i].style.display = displayRow ? '' : 'none';
+        }
     }
 
     function renderChart(data) {
