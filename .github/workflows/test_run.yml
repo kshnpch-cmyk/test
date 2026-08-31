@@ -1,0 +1,24 @@
+name: Test Google Sheet Update
+
+on:
+  workflow_dispatch: # 수동 실행 버튼 활성화
+
+jobs:
+  run-test:
+    runs-on: ubuntu-latest
+    steps:
+      - name: 저장소 코드 가져오기
+        uses: actions/checkout@v3
+
+      - name: 파이썬 환경 설정
+        uses: actions/setup-python@v4
+        with:
+          python-version: '3.10'
+
+      - name: 필요 라이브러리 설치
+        run: pip install gspread google-auth
+
+      - name: 구글 시트 연동 테스트 스크립트 실행
+        env:
+          GCP_TOKEN_JSON: ${{ secrets.GCP_TOKEN_JSON }}
+        run: python test_update.py
