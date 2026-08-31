@@ -1,4 +1,4 @@
-name: Test Google Sheet Update
+name: Run Price Update
 
 on:
   workflow_dispatch:
@@ -15,10 +15,10 @@ jobs:
         with:
           python-version: '3.10'
 
-      - name: 필요 라이브러리 설치
-        run: pip install gspread google-auth google-auth-oauthlib requests
+      - name: 필요 라이브러리 설치 (beautifulsoup4 추가)
+        run: pip install gspread google-auth google-auth-oauthlib requests beautifulsoup4
 
-      - name: 구글 시트 연동 테스트 스크립트 실행
+      - name: 가격 조사 및 시트 업데이트 스크립트 실행
         env:
           GCP_TOKEN_JSON: ${{ secrets.GCP_TOKEN_JSON }}
-        run: python test_update.py
+        run: python update_price.py
