@@ -10,9 +10,8 @@ from bs4 import BeautifulSoup
 
 def fetch_naver_price_mobile(search_query):
     """
-    네이버 쇼핑 모바일 페이지를 직접 크롤링하여
-    판매채널(J열), 최저가(K열), 택배비(L열)를 수집합니다.
-    (API 키 발급/등록 불필요)
+    네이버 모바일 쇼핑 페이지에서 판매채널(J열), 최저가(K열), 택배비(L열)를 크롤링합니다.
+    실패 시 디버깅을 위해 전체 텍스트를 로그에 출력합니다.
     """
     clean_query = search_query.replace("*", " ").strip()
     print(f"  [조사 요청] 검색어: '{clean_query}'")
@@ -20,7 +19,8 @@ def fetch_naver_price_mobile(search_query):
     headers = {
         "User-Agent": "Mozilla/5.0 (iPhone; CPU iPhone OS 17_0 like Mac OS X) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/17.0 Mobile/15E148 Safari/604.1",
         "Accept": "text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8",
-        "Accept-Language": "ko-KR,ko;q=0.9"
+        "Accept-Language": "ko-KR,ko;q=0.9",
+        "Referer": "https://msearch.shopping.naver.com/"
     }
     
     encoded_query = requests.utils.quote(clean_query)
@@ -28,30 +28,26 @@ def fetch_naver_price_mobile(search_query):
     
     try:
         response = requests.get(url, headers=headers, timeout=10)
+        print(f"  [응답 코드] {response.status_code}")
         
         if response.status_code == 200:
             soup = BeautifulSoup(response.text, 'html.parser')
+            text_content = soup.get_text(strip=True)
             
-            # 모바일 쇼핑 검색 결과 내 상품 리스트 태그
-            product_list = soup.select("div[class*='product_item']") or soup.select("li[class*='product_item']") or soup.select("div[class*='list_search']")
-            
-            # HTML 본문 텍스트 내에서 가격(원) 패턴 직접 추출
-            text_content = soup.get_text()
-            
-            # 1. 가격 추출 (예: "30,670원" 또는 "30670원")
+            # 1. 가격 추출 (예: "30,670원" 또는 "1,800원" 형태)
             price_matches = re.findall(r'([\d,]+)\s*원', text_content)
             sale_price = 0
+            
             if price_matches:
-                # 추출된 숫자 중 유효한 최저가 산출 (너무 작은 숫자 제외)
                 valid_prices = []
                 for p in price_matches:
                     num = int(p.replace(",", ""))
-                    if num >= 100:  # 100원 이상 금액만 유효 가격으로 판단
+                    if num >= 100:  # 100원 이상의 실제 상품 가격만 선별
                         valid_prices.append(num)
                 if valid_prices:
                     sale_price = min(valid_prices)
 
-            # 2. 판매채널 추출 (스마트스토어/쇼핑몰명)
+            # 2. 판매채널 추출
             channel_name = "네이버쇼핑"
             mall_el = soup.select_one("[class*='mall']") or soup.select_one("[class*='seller']") or soup.select_one("[class*='store']")
             if mall_el and mall_el.text.strip():
@@ -68,15 +64,20 @@ def fetch_naver_price_mobile(search_query):
 
             if sale_price > 0:
                 return channel_name, sale_price, shipping_fee
+            else:
+                print("  ⚠️ [추출 실패] 텍스트 파싱에서 유효한 가격을 찾지 못했습니다.")
+                print(f"  📄 --- [네이버 응답 본문 전체 텍스트 (총 {len(text_content)}자)] ---")
+                print(text_content[:3000])  # 본문 상위 3,000자 전체 출력
+                print("  --------------------------------------------------")
 
     except Exception as e:
-        print(f"  ❌ 모바일 크롤링 에러: {e}")
+        print(f"  ❌ 크롤링 예외: {e}")
 
     return None, None, None
 
 def run_price_update():
     try:
-        # 1. 구글 인증 (GCP_TOKEN_JSON만 사용)
+        # 1. 구글 인증 (GCP_TOKEN_JSON)
         token_secret = os.environ.get('GCP_TOKEN_JSON')
         if not token_secret:
             raise ValueError("❌ GitHub Secret에 'GCP_TOKEN_JSON'이 설정되지 않았습니다.")
@@ -99,7 +100,7 @@ def run_price_update():
         worksheet = doc.get_worksheet(0)
 
         print("==================================================")
-        print("📊 [모바일 크롤링 시작] 3행부터 10행까지 조사를 진행합니다.")
+        print("📊 [가격 수집 및 진단 가동] 3행부터 10행까지 조사를 시작합니다.")
         print("==================================================\n")
 
         for row_num in range(3, 11):
@@ -140,7 +141,7 @@ def run_price_update():
             print(f"  ✔ [완료] J={channel} | K={price:,}원 | L={shipping}\n")
             time.sleep(2.0)
 
-        print("🎉 가격 수집 및 시트 업데이트가 완료되었습니다!")
+        print("🎉 모든 작업 및 진단 출력이 완료되었습니다!")
 
     except Exception as e:
         print(f"❌ 오류 발생: {str(e)}")
