@@ -8,14 +8,33 @@ from google.auth.transport.requests import Request
 from bs4 import BeautifulSoup
 from curl_cffi import requests
 
-def fetch_danawa_price(search_query):
+def clean_search_term(product_name, spec):
     """
-    다나와(Danawa) 검색을 통해 판매채널(J열), 판매가(K열), 배송비(L열), 상품링크(S열)를 수집합니다.
+    품목명과 규격에서 중복된 용량 표현을 정리하고 
+    다나와 검색에 가장 적합한 키워드로 만듭니다.
     """
-    clean_query = search_query.replace("*", " ").strip()
-    print(f"  [다나와 검색] 키워드: '{clean_query}'")
+    # 1. 특수문자 제거 (* 등)
+    p_name = product_name.replace("*", " ").strip()
+    s_name = spec.replace("*", " ").strip()
     
-    encoded_query = requests.utils.quote(clean_query)
+    # 2. 품목명 내에 이미 규격(예: 920G, 1L 등)이 들어있다면 중복 결합 방지
+    # 품목명에 영문/숫자 단위가 포함되어 있으면 품목명 위주로 검색
+    if re.search(r'\d+\s*(g|kg|l|ml|ea)', p_name, re.IGNORECASE):
+        combined = p_name
+    else:
+        combined = f"{p_name} {s_name}".strip()
+        
+    return combined
+
+def fetch_danawa_price(product_name, spec):
+    """
+    다나와 검색 결과를 분석하고, 
+    소포장/스틱 등 오검색 상품을 필터링하여 정확한 본품 데이터를 수집합니다.
+    """
+    search_query = clean_search_term(product_name, spec)
+    print(f"  [다나와 정밀 검색] 키워드: '{search_query}'")
+    
+    encoded_query = requests.utils.quote(search_query)
     search_url = f"https://search.danawa.com/dsearch.php?k1={encoded_query}&module=goods&act=dispMain"
     
     headers = {
@@ -26,33 +45,52 @@ def fetch_danawa_price(search_query):
     }
 
     try:
-        # 크롬 브라우저 TLS 우회 접속
         response = requests.get(search_url, headers=headers, impersonate="chrome120", timeout=10)
-        print(f"  [응답 코드] {response.status_code}")
-
+        
         if response.status_code == 200:
             soup = BeautifulSoup(response.text, 'html.parser')
+            products = soup.select("li.prod_item:not(.product-pot)")
             
-            # 다나와 상품 리스트 추출 (광고 상품 제외 첫 번째 일반 상품)
-            first_product = soup.select_one("li.prod_item:not(.product-pot)") or soup.select_one("li.prod_item")
+            # 검색된 상품들 중 가장 조건에 맞는 상품 검증
+            target_product = None
             
-            if first_product:
-                # 1. 판매가 (K열)
-                price_el = first_product.select_one("p.price_sect a strong") or first_product.select_one("span.num")
-                if price_el:
-                    sale_price = int(re.sub(r'[^\d]', '', price_el.text))
-                else:
-                    sale_price = 0
+            # '920g' 대용량 검색인데 '스틱', '5g' 등의 오검색을 방지하기 위한 외설어 체크
+            exclude_keywords = ['스틱', '미니'] if '스틱' not in product_name else []
+            
+            for prod in products:
+                title_el = prod.select_one("p.prod_name a")
+                if not title_el:
+                    continue
+                
+                title_text = title_el.text.strip()
+                
+                # 제외 키워드가 포함되어 있다면 건너뜀 (예: 5g*60개 스틱 형태)
+                if any(ex in title_text for ex in exclude_keywords):
+                    continue
+                
+                # 조건에 적합한 첫 번째 상품 선택
+                target_product = prod
+                break
 
-                # 2. 판매채널 (J열) - 다나와로 지정 (특정 몰이 잡히면 해당 몰 이름, 아니면 '다나와')
-                channel_el = first_product.select_one("div.memory_sect p.memory_mall") or first_product.select_one("p.mall_name")
-                if channel_el and channel_el.text.strip():
-                    channel_name = channel_el.text.strip()
-                else:
-                    channel_name = "다나와"
+            # 검증된 상품이 없을 경우 첫 번째 일반 상품 선택
+            if not target_product and products:
+                target_product = products[0]
+
+            if target_product:
+                title_el = target_product.select_one("p.prod_name a")
+                title_text = title_el.text.strip() if title_el else ""
+                print(f"  └─ 🎯 매칭된 상품명: '{title_text}'")
+
+                # 1. 판매가 (K열)
+                price_el = target_product.select_one("p.price_sect a strong") or target_product.select_one("span.num")
+                sale_price = int(re.sub(r'[^\d]', '', price_el.text)) if price_el else 0
+
+                # 2. 판매채널 (J열)
+                channel_el = target_product.select_one("div.memory_sect p.memory_mall") or target_product.select_one("p.mall_name")
+                channel_name = channel_el.text.strip() if (channel_el and channel_el.text.strip()) else "다나와"
 
                 # 3. 배송비 (L열)
-                delivery_el = first_product.select_one("span.ship_fee") or first_product.select_one("div.delivery_sect")
+                delivery_el = target_product.select_one("span.ship_fee") or target_product.select_one("div.delivery_sect")
                 if delivery_el:
                     delivery_text = delivery_el.text.strip()
                     if "무료" in delivery_text:
@@ -63,8 +101,8 @@ def fetch_danawa_price(search_query):
                 else:
                     shipping_fee = "기본배송"
 
-                # 4. 링크 추출 (S열) - 상품 개별 상세 링크 추출 (없을 경우 검색 결과 페이지 링크)
-                link_el = first_product.select_one("p.prod_name a") or first_product.select_one("a.thumb_link")
+                # 4. 링크 (S열)
+                link_el = target_product.select_one("p.prod_name a") or target_product.select_one("a.thumb_link")
                 if link_el and link_el.get('href'):
                     product_link = link_el.get('href')
                     if product_link.startswith("//"):
@@ -105,7 +143,7 @@ def run_price_update():
         worksheet = doc.get_worksheet(0)
 
         print("==================================================")
-        print("📊 [다나와 가격 수집 가동] 3행부터 10행까지 조사를 시작합니다.")
+        print("📊 [다나와 가격/링크 수집 시작] 3행부터 10행까지 조사를 가동합니다.")
         print("==================================================\n")
 
         for row_num in range(3, 11):
@@ -126,20 +164,19 @@ def run_price_update():
                 print(f"  ⏭️ 스킵됨 (품목명 없음)\n")
                 continue
 
-            # 1차 시도: C열(품목명) + D열(규격)
-            search_query = f"{product_name} {spec}".strip()
-            channel, price, shipping, link = fetch_danawa_price(search_query)
+            # 1차 시도: 정밀 키워드 조합 검색
+            channel, price, shipping, link = fetch_danawa_price(product_name, spec)
 
             # 2차 시도 (실패 시): C열(품목명) 단독 검색
             if not channel or price == 0:
                 print(f"  └─ ⚠️ 1차 실패 후 품목명 단독 재검색 시도: '{product_name}'")
-                channel, price, shipping, link = fetch_danawa_price(product_name.strip())
+                channel, price, shipping, link = fetch_danawa_price(product_name, "")
 
             if not channel or price == 0:
                 channel, price, shipping, link = "검색결과없음", 0, "-", "-"
 
             # 시트 업데이트
-            # J열(10): 판매채널, K열(11): 판매가, L열(12): 택배비
+            # J열(10): 판매채널, K열(11): 판매가, L열(12: 택배비)
             worksheet.update_cell(row_num, 10, channel)
             worksheet.update_cell(row_num, 11, price)
             worksheet.update_cell(row_num, 12, shipping)
@@ -154,7 +191,7 @@ def run_price_update():
             print(f"  ✔ [완료] J={channel} | K={price:,}원 | L={shipping} | S=링크입력완료\n")
             time.sleep(2.0)
 
-        print("🎉 다나와 가격 수집 및 구글 시트(S열 링크 포함) 업데이트가 완료되었습니다!")
+        print("🎉 다나와 정밀 수집 및 구글 시트 업데이트가 완료되었습니다!")
 
     except Exception as e:
         print(f"❌ 오류 발생: {str(e)}")
