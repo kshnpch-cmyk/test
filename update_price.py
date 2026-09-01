@@ -10,19 +10,16 @@ from curl_cffi import requests
 
 def extract_pack_quantity(spec_text):
     """
-    D열(규격) 텍스트에서 묶음 수량(EA, 개, 팩, Box 등)을 자동 추출합니다.
-    예: '300g*20ea' -> 20 | '1L*16EA' -> 16 | '1KG*6팩' -> 6
-    수량을 찾지 못하면 기본값 1을 반환합니다.
+    D열(규격) 텍스트에서 묶음 수량(EA, 개, 팩, Box 등)을 추출합니다.
+    예: '300g*20ea' -> 20 | '1L*16EA' -> 16
     """
     if not spec_text:
         return 1
     
-    # 1. *20ea, *20개, *20팩 형태 추출
     match = re.search(r'\*\s*(\d+)\s*(?:ea|개|팩|box|박스|통|병|개입)?', spec_text, re.IGNORECASE)
     if match:
         return int(match.group(1))
         
-    # 2. 20ea, 20개 등 숫자+단위 추출
     match_unit = re.search(r'(\d+)\s*(?:ea|개|팩|box|박스|통|병)(?!\w)', spec_text, re.IGNORECASE)
     if match_unit:
         return int(match_unit.group(1))
@@ -30,9 +27,7 @@ def extract_pack_quantity(spec_text):
     return 1
 
 def extract_keywords(product_name, spec):
-    """
-    품목명과 규격에서 핵심 검색 단어(브랜드, 품목, 용량 등)를 추출합니다.
-    """
+    """품목명과 규격에서 핵심 키워드를 추출합니다."""
     combined = f"{product_name} {spec}".lower()
     capacities = re.findall(r'\d+\s*(?:g|kg|l|ml|ea)', combined)
     words = re.findall(r'[가-힣a-zA-Z0-9]+', combined)
@@ -47,25 +42,13 @@ def extract_keywords(product_name, spec):
 
     return required
 
-def fetch_danawa_price_adjusted(product_name, spec):
-    """
-    다나와에서 최저가를 수집한 뒤, 우리 시트 규격 수량(예: *20ea)을 계산하여
-    총 최저가, 판매채널, 배송비(있으면 금액, 없으면 공란), 링크를 반환합니다.
-    """
+def fetch_danawa_price(product_name, spec):
+    """다나와 최저가 수집 (단품가 × 수량 계산)"""
     clean_p = product_name.replace("*", " ").strip()
     clean_s = spec.replace("*", " ").strip()
-    
-    # 규격 수량 파싱 (예: 20EA -> 20)
     pack_qty = extract_pack_quantity(spec)
     
-    # 검색어 정제 (수량 단위 단독 검색어 배제)
-    if re.search(r'\d+\s*(g|kg|l|ml|ea)', clean_p, re.IGNORECASE):
-        search_query = clean_p
-    else:
-        # 단품 단위 용량 파악을 위해 규격 조합
-        search_query = f"{clean_p} {clean_s}".strip()
-
-    print(f"  [조사 요청] 검색어: '{search_query}' (규격 계산 수량: {pack_qty}개)")
+    search_query = clean_p if re.search(r'\d+\s*(g|kg|l|ml|ea)', clean_p, re.IGNORECASE) else f"{clean_p} {clean_s}".strip()
     required_keywords = extract_keywords(product_name, spec)
 
     encoded_query = requests.utils.quote(search_query)
@@ -73,8 +56,6 @@ def fetch_danawa_price_adjusted(product_name, spec):
     
     headers = {
         "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36",
-        "Accept": "text/html,application/xhtml+xml,application/xml;q=0.9,image/avif,image/webp,*/*;q=0.8",
-        "Accept-Language": "ko-KR,ko;q=0.9",
         "Referer": "https://www.danawa.com/"
     }
 
@@ -88,9 +69,6 @@ def fetch_danawa_price_adjusted(product_name, spec):
             target_product = None
             is_exact_match = False
 
-            # ----------------------------------------------------
-            # 1단계 시도: '완전일치' 상품 탐색
-            # ----------------------------------------------------
             for prod in products:
                 title_el = prod.select_one("p.prod_name a")
                 if not title_el:
@@ -102,35 +80,20 @@ def fetch_danawa_price_adjusted(product_name, spec):
                 if all(kw in title_lower for kw in required_keywords):
                     target_product = prod
                     is_exact_match = True
-                    print(f"  └─ 🎯 [1차 완전일치]: '{title_text}'")
                     break
 
-            # ----------------------------------------------------
-            # 2단계 시도: 완전일치 실패 시 '유사 상품' 탐색
-            # ----------------------------------------------------
             if not target_product and products:
-                for prod in products:
-                    title_el = prod.select_one("p.prod_name a")
-                    if title_el:
-                        target_product = prod
-                        print(f"  └─ 🔍 [2차 유사매칭]: '{title_el.text.strip()}'")
-                        break
+                target_product = products[0]
 
-            # 정보 추출 및 우리 시트 규격 수량 맞춤 계산
             if target_product:
-                # 1. 단품 가격 추출
                 price_el = target_product.select_one("p.price_sect a strong") or target_product.select_one("span.num")
                 single_price = int(re.sub(r'[^\d]', '', price_el.text)) if price_el else 0
-
-                # 2. 우리 시트 규격 수량(pack_qty)에 맞춰 총 금액 계산
                 total_sale_price = single_price * pack_qty
 
-                # 3. 판매채널 (J열)
                 channel_el = target_product.select_one("div.memory_sect p.memory_mall") or target_product.select_one("p.mall_name")
                 mall_text = channel_el.text.strip() if (channel_el and channel_el.text.strip()) else "다나와"
                 channel_name = mall_text if is_exact_match else f"{mall_text}(유사)"
 
-                # 4. 배송비 (L열) - 있으면 금액, 무료/미확인은 공란("") 처리
                 delivery_el = target_product.select_one("span.ship_fee") or target_product.select_one("div.delivery_sect")
                 shipping_fee = ""
                 if delivery_el:
@@ -139,7 +102,6 @@ def fetch_danawa_price_adjusted(product_name, spec):
                     if nums and "무료" not in delivery_text:
                         shipping_fee = f"{int(nums[0]):,}원"
 
-                # 5. 링크 (S열)
                 link_el = target_product.select_one("p.prod_name a") or target_product.select_one("a.thumb_link")
                 if link_el and link_el.get('href'):
                     product_link = link_el.get('href')
@@ -154,7 +116,56 @@ def fetch_danawa_price_adjusted(product_name, spec):
     except Exception as e:
         print(f"  ❌ 다나와 수집 예외: {e}")
 
-    return None, None, None, None
+    return None, 0, "", "-"
+
+def fetch_baemin_price(product_name, spec):
+    """배민상회 최저가 수집 (단품가 × 수량 계산)"""
+    clean_p = product_name.replace("*", " ").strip()
+    clean_s = spec.replace("*", " ").strip()
+    pack_qty = extract_pack_quantity(spec)
+    
+    search_query = clean_p if re.search(r'\d+\s*(g|kg|l|ml|ea)', clean_p, re.IGNORECASE) else f"{clean_p} {clean_s}".strip()
+    
+    encoded_query = requests.utils.quote(search_query)
+    search_url = f"https://mart.baemin.com/search?keyword={encoded_query}"
+    
+    headers = {
+        "User-Agent": "Mozilla/5.0 (iPhone; CPU iPhone OS 17_4_1 like Mac OS X) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/17.4.1 Mobile/15E148 Safari/604.1",
+        "Referer": "https://mart.baemin.com/"
+    }
+
+    try:
+        response = requests.get(search_url, headers=headers, impersonate="chrome120", timeout=10)
+        
+        if response.status_code == 200:
+            soup = BeautifulSoup(response.text, 'html.parser')
+            # 배민상회 상품 카드 선택
+            products = soup.select("a[class*='ProductItem']") or soup.select("li[class*='ProductList']") or soup.select("a[href*='/goods']")
+            
+            if products:
+                first_prod = products[0]
+                
+                # 가격 추출
+                price_el = first_prod.select_one("[class*='price']") or first_prod.select_one("span[class*='Price']")
+                if price_el:
+                    nums = re.findall(r'[\d,]+', price_el.text)
+                    if nums:
+                        single_price = int(nums[0].replace(",", ""))
+                        total_price = single_price * pack_qty
+                        
+                        # 배민상회 상세 링크
+                        href = first_prod.get('href', '')
+                        product_link = f"https://mart.baemin.com{href}" if href.startswith('/') else search_url
+                        
+                        # 기본 배송비 (배민상회 배송 정책)
+                        shipping_fee = ""
+                        
+                        return "배민상회", total_price, shipping_fee, product_link
+
+    except Exception as e:
+        print(f"  ❌ 배민상회 수집 예외: {e}")
+
+    return "배민상회", 0, "", "-"
 
 def run_price_update():
     try:
@@ -180,12 +191,11 @@ def run_price_update():
         doc = gc.open_by_url(sheet_url)
         worksheet = doc.get_worksheet(0)
 
-        # 전체 데이터 로드
         all_rows = worksheet.get_all_values()
         total_rows = len(all_rows)
 
         print("==================================================")
-        print(f"📊 [규격 수량 맞춤 계산 가동] 총 {total_rows}개 행 수집을 시작합니다.")
+        print(f"📊 [다나와 vs 배민상회 가격 비교 가동] 총 {total_rows}개 행을 처리합니다.")
         print("==================================================\n")
 
         for row_idx in range(3, total_rows + 1):
@@ -206,33 +216,47 @@ def run_price_update():
                 print(f"  ⏭️ 스킵됨 (품목명 없음)\n")
                 continue
 
-            # 다나와 가격 수집 및 규격 수량 맞춤 자동 계산
-            channel, price, shipping, link = fetch_danawa_price_adjusted(product_name, spec)
+            # 1. 다나와 수집
+            d_channel, d_price, d_shipping, d_link = fetch_danawa_price(product_name, spec)
+            
+            # 2. 배민상회 수집
+            b_channel, b_price, b_shipping, b_link = fetch_baemin_price(product_name, spec)
 
-            if not channel or price == 0:
-                channel, price, shipping, link = "검색결과없음", 0, "", "-"
+            # 3. 가격 비교 로직 (더 저렴한 채널 결정)
+            final_channel, final_price, final_shipping, final_link = d_channel, d_price, d_shipping, d_link
 
-            # 시트 업데이트 (J=10: 채널, K=11: 총금액, L=12: 배송비, S=19: 링크)
-            worksheet.update_cell(row_idx, 10, channel)
-            worksheet.update_cell(row_idx, 11, price)
-            worksheet.update_cell(row_idx, 12, shipping)
+            if b_price > 0:
+                if d_price == 0 or b_price < d_price:
+                    print(f"  💡 [배민상회 우세] 배민({b_price:,}원) < 다나와({d_price:,}원) ➔ 배민상회로 덮어씁니다.")
+                    final_channel, final_price, final_shipping, final_link = b_channel, b_price, b_shipping, b_link
+                else:
+                    print(f"  ⚖️ [다나와 우세/동일] 다나와({d_price:,}원) <= 배민({b_price:,}원) ➔ 다나와 유지")
 
-            if link and link != "-":
-                hyperlink_formula = f'=HYPERLINK("{link}", "링크보기")'
+            if final_price == 0:
+                final_channel, final_price, final_shipping, final_link = "검색결과없음", 0, "", "-"
+
+            # 구글 시트 업데이트
+            worksheet.update_cell(row_idx, 10, final_channel)   # J열: 판매채널
+            worksheet.update_cell(row_idx, 11, final_price)     # K열: 판매가
+            worksheet.update_cell(row_idx, 12, final_shipping)  # L열: 택배비
+
+            # S열(19): 링크 수식 업데이트
+            if final_link and final_link != "-":
+                hyperlink_formula = f'=HYPERLINK("{final_link}", "링크보기")'
                 worksheet.update_cell(row_idx, 19, hyperlink_formula)
             else:
                 worksheet.update_cell(row_idx, 19, "-")
 
-            disp_shipping = shipping if shipping else "공란(무료/없음)"
-            print(f"  ✔ [완료] J={channel} | K={price:,}원(총액) | L={disp_shipping} | S=링크완료\n")
+            disp_shipping = final_shipping if final_shipping else "공란(무료/없음)"
+            print(f"  ✔ [완료] 선택채널={final_channel} | 최저가={final_price:,}원 | 배송비={disp_shipping}\n")
 
-            time.sleep(1.8)
+            time.sleep(2.0)
 
             if row_idx % 50 == 0:
                 print("  💤 API 요청 안정화를 위해 5초간 대기합니다...\n")
                 time.sleep(5)
 
-        print("🎉 전체 품목 규격 수량 맞춤 정산 및 시트 업데이트가 완벽히 완료되었습니다!")
+        print("🎉 다나와 vs 배민상회 최저가 비교 및 구글 시트 업데이트가 완벽히 완료되었습니다!")
 
     except Exception as e:
         print(f"❌ 오류 발생: {str(e)}")
