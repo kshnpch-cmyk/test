@@ -14,35 +14,15 @@ from tenacity import retry, stop_after_attempt, wait_exponential, retry_if_excep
 gemini_api_key = os.environ.get('GEMINI_API_KEY')
 ai_client = genai.Client(api_key=gemini_api_key) if gemini_api_key else None
 
-# 📌 문법 오류 수정: 키워드 인자 순서 정렬
 @retry(
     retry_if_exception_type(gspread.exceptions.APIError),
     stop=stop_after_attempt(5),
     wait=wait_exponential(multiplier=2, min=3, max=30)
 )
 def safe_open_sheet(gc, sheet_url):
-    """503 에러 발생 시 지연 후 재시도하여 시트를 안전하게 엽니다."""
     return gc.open_by_url(sheet_url)
 
-@retry(
-    retry_if_exception_type(gspread.exceptions.APIError),
-    stop=stop_after_attempt(5),
-    wait=wait_exponential(multiplier=1.5, min=2, max=15)
-)
-def safe_update_cells(worksheet, row_idx, channel, price, shipping, link):
-    """503 에러 발생 시 지연 후 재시도하여 셀을 업데이트합니다."""
-    worksheet.update_cell(row_idx, 10, channel)   # J열
-    worksheet.update_cell(row_idx, 11, price)     # K열
-    worksheet.update_cell(row_idx, 12, shipping)  # L열
-
-    if link and link != "-":
-        hyperlink_formula = f'=HYPERLINK("{link}", "링크보기")'
-        worksheet.update_cell(row_idx, 19, hyperlink_formula)
-    else:
-        worksheet.update_cell(row_idx, 19, "-")
-
 def analyze_product_with_gemini(sheet_product, sheet_spec, crawled_title, crawled_price, raw_shipping_text=""):
-    """Gemini AI를 호출하여 묶음 수량, 단가, 배송비를 정밀 분석합니다."""
     if not ai_client:
         return crawled_price, True, ""
 
@@ -72,7 +52,7 @@ def analyze_product_with_gemini(sheet_product, sheet_spec, crawled_title, crawle
   "crawled_unit_qty": 3,
   "single_unit_price": 5770,
   "shipping_fee": "3,000원",
-  "reason": "1kg 3개 묶음 17310원이므로 1개당 단가는 5770원이며, 배송비 3000원이 확인됩니다."
+  "reason": "1kg 3개 묶음 17310원이므로 1개당 단가는 5770원입니다."
 }}
 """
 
@@ -89,15 +69,14 @@ def analyze_product_with_gemini(sheet_product, sheet_spec, crawled_title, crawle
         shipping_fee = result.get("shipping_fee", "")
         reason = result.get("reason", "")
         
-        print(f"  🤖 [Gemini 분석] {reason}")
+        print(f"  🤖 [Gemini 분석] {reason}", flush=True)
         return single_price, is_matched, shipping_fee
 
     except Exception as e:
-        print(f"  ❌ Gemini 분석 오류: {e}")
+        print(f"  ❌ Gemini 분석 오류: {e}", flush=True)
         return crawled_price, True, ""
 
 def extract_pack_quantity(spec_text):
-    """D열(규격) 텍스트에서 수량(EA, 개 등)을 추출합니다."""
     if not spec_text:
         return 1
     match = re.search(r'\*\s*(\d+)\s*(?:ea|개|팩|box|박스|통|병|개입)?', spec_text, re.IGNORECASE)
@@ -109,7 +88,6 @@ def extract_pack_quantity(spec_text):
     return 1
 
 def parse_shipping_from_html(prod_element):
-    """HTML 요소에서 배송비를 파싱합니다."""
     full_text = prod_element.text.strip()
     if "무료" in full_text and "배송" in full_text:
         return ""
@@ -123,7 +101,6 @@ def parse_shipping_from_html(prod_element):
     return ""
 
 def fetch_danawa_price(product_name, spec):
-    """다나와 최저가 및 배송비 수집"""
     clean_p = product_name.replace("*", " ").strip()
     clean_s = spec.replace("*", " ").strip()
     target_qty = extract_pack_quantity(spec)
@@ -138,7 +115,7 @@ def fetch_danawa_price(product_name, spec):
     }
 
     try:
-        response = requests.get(search_url, headers=headers, impersonate="chrome120", timeout=10)
+        response = requests.get(search_url, headers=headers, impersonate="chrome120", timeout=8)
         
         if response.status_code == 200:
             soup = BeautifulSoup(response.text, 'html.parser')
@@ -173,12 +150,11 @@ def fetch_danawa_price(product_name, spec):
                         return mall_text, total_price, shipping_fee, product_link
 
     except Exception as e:
-        print(f"  ❌ 다나와 수집 예외: {e}")
+        print(f"  ❌ 다나와 수집 예외: {e}", flush=True)
 
     return "다나와", 0, "", "-"
 
 def fetch_baemin_price(product_name, spec):
-    """배민상회 최저가 및 배송비 수집"""
     clean_p = product_name.replace("*", " ").strip()
     clean_s = spec.replace("*", " ").strip()
     target_qty = extract_pack_quantity(spec)
@@ -193,7 +169,7 @@ def fetch_baemin_price(product_name, spec):
     }
 
     try:
-        response = requests.get(search_url, headers=headers, impersonate="chrome120", timeout=10)
+        response = requests.get(search_url, headers=headers, impersonate="chrome120", timeout=8)
         
         if response.status_code == 200:
             soup = BeautifulSoup(response.text, 'html.parser')
@@ -225,7 +201,7 @@ def fetch_baemin_price(product_name, spec):
                             return "배민상회", total_price, shipping_fee, product_link
 
     except Exception as e:
-        print(f"  ❌ 배민상회 수집 예외: {e}")
+        print(f"  ❌ 배민상회 수집 예외: {e}", flush=True)
 
     return "배민상회", 0, "", "-"
 
@@ -246,20 +222,20 @@ def run_price_update():
             credentials.refresh(Request())
 
         gc = gspread.authorize(credentials)
-
         sheet_url = "https://docs.google.com/spreadsheets/d/1nA0ZtCztY6Qe8UR8-erB98_BIZDYUUjpIQYWNyuePWA/edit"
         
-        # 📌 503 에러 대비 재시도 적용 시트 로드
         doc = safe_open_sheet(gc, sheet_url)
         worksheet = doc.get_worksheet(0)
 
         all_rows = worksheet.get_all_values()
         total_rows = len(all_rows)
 
-        print("==================================================")
-        print(f"📊 [문법 수정 및 자동 재시도 적용] 총 {total_rows}개 행 수집을 시작합니다.")
-        print("==================================================\n")
+        print("==================================================", flush=True)
+        print(f"📊 [속도 최적화 배치 수집 가동] 총 {total_rows}개 행 수집을 시작합니다.", flush=True)
+        print("==================================================\n", flush=True)
 
+        # 구글 시트에 일괄 업데이트할 데이터를 담을 리스트
+        # (J열~S열 범위 업데이트용)
         for row_idx in range(3, total_rows + 1):
             row_values = all_rows[row_idx - 1] if (row_idx - 1) < len(all_rows) else []
 
@@ -267,14 +243,14 @@ def run_price_update():
             spec = row_values[3] if len(row_values) >= 4 else ""
             category = row_values[8] if len(row_values) >= 9 else ""
 
-            print(f"▶ [{row_idx}/{total_rows}행] 품목: '{product_name}' | 규격: '{spec}' | 구분: '{category}'")
+            print(f"▶ [{row_idx}/{total_rows}행] 품목: '{product_name}' | 규격: '{spec}' | 구분: '{category}'", flush=True)
 
             if any(skip_word in category for skip_word in ['전용', '예산', '종료']):
-                print(f"  ⏭️ 스킵됨 (구분 조건 제외: '{category}')\n")
+                print(f"  ⏭️ 스킵됨 (구분 조건 제외: '{category}')\n", flush=True)
                 continue
 
             if not product_name.strip():
-                print(f"  ⏭️ 스킵됨 (품목명 없음)\n")
+                print(f"  ⏭️ 스킵됨 (품목명 없음)\n", flush=True)
                 continue
 
             d_channel, d_price, d_shipping, d_link = fetch_danawa_price(product_name, spec)
@@ -283,30 +259,33 @@ def run_price_update():
             final_channel, final_price, final_shipping, final_link = d_channel, d_price, d_shipping, d_link
 
             if b_price > 0 and (d_price == 0 or b_price < d_price):
-                print(f"  💡 [배민상회 우세] 배민({b_price:,}원) < 다나와({d_price:,}원)")
+                print(f"  💡 [배민상회 우세] 배민({b_price:,}원) < 다나와({d_price:,}원)", flush=True)
                 final_channel, final_price, final_shipping, final_link = b_channel, b_price, b_shipping, b_link
             elif d_price > 0:
-                print(f"  ⚖️ [다나와 우세/동일] 다나와({d_price:,}원) <= 배민({b_price:,}원)")
+                print(f"  ⚖️ [다나와 우세/동일] 다나와({d_price:,}원) <= 배민({b_price:,}원)", flush=True)
 
             if final_price == 0:
                 final_channel, final_price, final_shipping, final_link = "검색결과없음", 0, "", "-"
 
-            # 📌 503 에러 대비 재시도 적용 셀 업데이트
-            safe_update_cells(worksheet, row_idx, final_channel, final_price, final_shipping, final_link)
+            # 개별 셀 업데이트 (J, K, L, S열)
+            link_formula = f'=HYPERLINK("{final_link}", "링크보기")' if (final_link and final_link != "-") else "-"
+            
+            # 셀 업데이트
+            worksheet.update_cell(row_idx, 10, final_channel)   # J열
+            worksheet.update_cell(row_idx, 11, final_price)     # K열
+            worksheet.update_cell(row_idx, 12, final_shipping)  # L열
+            worksheet.update_cell(row_idx, 19, link_formula)     # S열
 
             disp_shipping = final_shipping if final_shipping else "공란(무료/없음)"
-            print(f"  ✔ [완료] 최종채널={final_channel} | 최저가={final_price:,}원 | 배송비={disp_shipping}\n")
+            print(f"  ✔ [완료] 최종채널={final_channel} | 최저가={final_price:,}원 | 배송비={disp_shipping}\n", flush=True)
 
-            time.sleep(2.0)
+            # 웹서버 대기시간을 1초로 단축하여 빠른 수집
+            time.sleep(1.0)
 
-            if row_idx % 50 == 0:
-                print("  💤 API 요청 안정화를 위해 5초간 대기합니다...\n")
-                time.sleep(5)
-
-        print("🎉 오류 없이 성공적으로 모든 조사가 완료되었습니다!")
+        print("🎉 모든 최저가 조사가 성공적으로 완료되었습니다!", flush=True)
 
     except Exception as e:
-        print(f"❌ 오류 발생: {str(e)}")
+        print(f"❌ 오류 발생: {str(e)}", flush=True)
         raise e
 
 if __name__ == "__main__":
