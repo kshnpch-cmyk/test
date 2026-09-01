@@ -2,6 +2,7 @@ import os
 import json
 import time
 import re
+import warnings
 import gspread
 from google import genai
 from google.oauth2.credentials import Credentials
@@ -10,7 +11,8 @@ from bs4 import BeautifulSoup
 from curl_cffi import requests
 from tenacity import retry, stop_after_attempt, wait_exponential, retry_if_exception_type
 
-# Gemini API 클라이언트 초기화
+warnings.filterwarnings("ignore", category=UserWarning)
+
 gemini_api_key = os.environ.get('GEMINI_API_KEY')
 ai_client = genai.Client(api_key=gemini_api_key) if gemini_api_key else None
 
@@ -30,18 +32,59 @@ def safe_open_sheet(gc, sheet_url):
 def safe_batch_update(worksheet, cell_range, values_matrix):
     worksheet.update(cell_range, values_matrix, raw=False)
 
+@retry(
+    retry=retry_if_exception_type(Exception),
+    stop=stop_after_attempt(5),
+    wait=wait_exponential(multiplier=3, min=8, max=30)
+)
+def call_gemini_api(prompt):
+    return ai_client.models.generate_content(
+        model='gemini-2.5-flash',
+        contents=prompt,
+        config={
+            'response_mime_type': 'application/json',
+            'tools': []
+        }
+    )
+
+def parse_total_capacity(spec_text):
+    """
+    규격 텍스트(예: '5KG*2EA', '1kg*12개', '500g*10')에서 총 중량/용량(g 또는 ml 단위)을 산출합니다.
+    예: 5KG*2EA -> 10000g | 1kg*12개 -> 12000g
+    """
+    if not spec_text:
+        return 0, 1
+
+    spec_lower = spec_text.lower().replace(" ", "")
+    
+    # 1. 용량과 수량이 포함된 패턴 (예: 5kg*2ea, 500g*10개)
+    match = re.search(r'(\d+(?:\.\d+)?)\s*(kg|g|l|ml)\s*\*?\s*(\d+)?', spec_lower)
+    if match:
+        val = float(match.group(1))
+        unit = match.group(2)
+        qty = int(match.group(3)) if match.group(3) else 1
+
+        # g/ml 기준 단위로 통일
+        if unit in ['kg', 'l']:
+            base_val = val * 1000
+        else:
+            base_val = val
+
+        return base_val * qty, qty
+
+    return 0, 1
+
 def analyze_product_with_gemini(sheet_product, sheet_spec, crawled_title, crawled_price, raw_shipping_text=""):
-    """Gemini AI를 이용해 상품 일치 여부, 묶음 수량, 단품 단가, 배송비를 정밀 파싱합니다."""
     if not ai_client:
         return crawled_price, True, ""
 
     prompt = f"""
-너는 쇼핑몰 데이터 분석 전문가야.
-아래 [구글 시트 요청 정보]와 크롤링한 [쇼핑몰 검색 결과]를 비교 분석해줘.
+너는 쇼핑몰 데이터 분석 및 용량 계산 전문가야.
+아래 [구글 시트 요청 정보]와 크롤링한 [쇼핑몰 검색 결과]를 분석해줘.
 
 [구글 시트 요청 정보]
 - 품목명: {sheet_product}
-- 규격: {sheet_spec}
+- 시트 규격: {sheet_spec}
 
 [쇼핑몰 검색 결과]
 - 검색된 상품명: {crawled_title}
@@ -49,51 +92,46 @@ def analyze_product_with_gemini(sheet_product, sheet_spec, crawled_title, crawle
 - 수집된 배송비 관련 텍스트: {raw_shipping_text}
 
 다음 질문에 맞춰 오직 JSON 형식으로만 응답해:
-1. "is_matched": 검색된 상품이 구글 시트 요청 품목과 동일한 종류의 상품인지 여부 (true/false)
-2. "crawled_unit_qty": 검색된 상품명 속 제품 개수 (숫자만, 예: 3). 단품이면 1
-3. "single_unit_price": 검색된 표시 가격을 개수로 나눈 '1개당 단가' (숫자만)
-4. "shipping_fee": 배송비 금액 (무료배송/로켓배송/정보없음은 "", 배송비가 3,000원이면 '3,000원' 형태)
-5. "reason": 판단 이유 요약
+1. "is_matched": 검색된 상품이 시트 요청 품목과 동일한 종류인지 여부 (true/false)
+2. "crawled_total_capacity_g": 검색된 상품명(예: '1kg (12개)')의 전체 총 용량/중량(g 또는 ml 숫자만, 예: 12kg -> 12000). 모르면 0
+3. "sheet_target_capacity_g": 구글 시트 규격(예: '5KG*2EA')의 전체 목표 총 용량/중량(g 또는 ml 숫자만, 예: 10kg -> 10000). 모르면 0
+4. "shipping_fee": 배송비 금액 (무료/로켓배송/정보없음은 "", 유료배송비면 '3,000원' 형태)
+5. "reason": 판단 및 중량 환산 이유 요약
 
 응답 형식(JSON):
 {{
   "is_matched": true,
-  "crawled_unit_qty": 1,
-  "single_unit_price": 6110,
-  "shipping_fee": "3,000원",
-  "reason": "단품 6110원이며, 유료 배송비 3,000원이 확인됩니다."
+  "crawled_total_capacity_g": 12000,
+  "sheet_target_capacity_g": 10000,
+  "shipping_fee": "",
+  "reason": "검색 제품은 총 12kg(51,020원)이며 시트 목표는 10kg이므로 비례 환산 적용 대상입니다."
 }}
 """
 
     try:
-        response = ai_client.models.generate_content(
-            model='gemini-3.6-flash',
-            contents=prompt,
-            config={'response_mime_type': 'application/json'}
-        )
+        response = call_gemini_api(prompt)
+        time.sleep(1.2)
         
         result = json.loads(response.text)
         is_matched = result.get("is_matched", True)
-        single_price = result.get("single_unit_price", crawled_price)
+        crawled_g = result.get("crawled_total_capacity_g", 0)
+        target_g = result.get("sheet_target_capacity_g", 0)
         shipping_fee = result.get("shipping_fee", "")
         reason = result.get("reason", "")
-        
-        return single_price, is_matched, shipping_fee
+
+        # 📌 총 용량/중량 비례 환산 계산 (51,020원 / 12kg * 10kg = 42,516원)
+        final_calculated_price = crawled_price
+        if crawled_g > 0 and target_g > 0:
+            final_calculated_price = int((crawled_price / crawled_g) * target_g)
+            print(f"  🤖 [Gemini 환산] {crawled_g}g({crawled_price:,}원) ➔ {target_g}g 환산가: {final_calculated_price:,}원", flush=True)
+        else:
+            print(f"  🤖 [Gemini 분석] {reason}", flush=True)
+
+        return final_calculated_price, is_matched, shipping_fee
 
     except Exception as e:
-        print(f"  ❌ Gemini 분석 오류: {e}", flush=True)
+        print(f"  ❌ Gemini 분석 예외: {e}", flush=True)
         return crawled_price, True, ""
-
-def extract_pack_quantity(spec_text):
-    if not spec_text:
-        return 1
-    match = re.search(r'\*\s*(\d+)\s*(?:ea|개|팩|box|박스|통|병|개입)?', spec_text, re.IGNORECASE)
-    if match:
-        return int(match.group(1))
-    match_unit = re.search(r'(\d+)\s*(?:ea|개|팩|box|박스|통|병)(?!\w)', spec_text, re.IGNORECASE)
-    if match_unit:
-        return int(match_unit.group(1))
-    return 1
 
 # ----------------------------------------------------
 # 1. 다나와 수집
@@ -101,7 +139,6 @@ def extract_pack_quantity(spec_text):
 def fetch_danawa_price(product_name, spec):
     clean_p = product_name.replace("*", " ").strip()
     clean_s = spec.replace("*", " ").strip()
-    target_qty = extract_pack_quantity(spec)
     
     search_query = clean_p if re.search(r'\d+\s*(g|kg|l|ml|ea)', clean_p, re.IGNORECASE) else f"{clean_p} {clean_s}".strip()
     encoded_query = requests.utils.quote(search_query)
@@ -113,7 +150,7 @@ def fetch_danawa_price(product_name, spec):
     }
 
     try:
-        response = requests.get(search_url, headers=headers, impersonate="chrome120", timeout=5)
+        response = requests.get(search_url, headers=headers, impersonate="chrome120", timeout=10)
         if response.status_code == 200:
             soup = BeautifulSoup(response.text, 'html.parser')
             products = soup.select("li.prod_item:not(.product-pot)")
@@ -130,12 +167,11 @@ def fetch_danawa_price(product_name, spec):
                 ship_text = ship_el.text.strip() if ship_el else ""
 
                 if raw_price > 0:
-                    single_price, is_matched, ai_shipping = analyze_product_with_gemini(
+                    calculated_price, is_matched, ai_shipping = analyze_product_with_gemini(
                         product_name, spec, title_text, raw_price, raw_shipping_text=ship_text
                     )
                     
                     if is_matched:
-                        total_price = int(single_price * target_qty)
                         channel_el = first_prod.select_one("div.memory_sect p.memory_mall") or first_prod.select_one("p.mall_name")
                         mall_text = channel_el.text.strip() if (channel_el and channel_el.text.strip()) else "다나와"
 
@@ -143,7 +179,7 @@ def fetch_danawa_price(product_name, spec):
                         href = link_el.get('href') if link_el else ""
                         product_link = f"https:{href}" if href.startswith("//") else (href or search_url)
 
-                        return mall_text, total_price, ai_shipping, product_link
+                        return mall_text, calculated_price, ai_shipping, product_link
 
     except Exception as e:
         pass
@@ -156,7 +192,6 @@ def fetch_danawa_price(product_name, spec):
 def fetch_baemin_price(product_name, spec):
     clean_p = product_name.replace("*", " ").strip()
     clean_s = spec.replace("*", " ").strip()
-    target_qty = extract_pack_quantity(spec)
     
     search_query = clean_p if re.search(r'\d+\s*(g|kg|l|ml|ea)', clean_p, re.IGNORECASE) else f"{clean_p} {clean_s}".strip()
     encoded_query = requests.utils.quote(search_query)
@@ -168,7 +203,7 @@ def fetch_baemin_price(product_name, spec):
     }
 
     try:
-        response = requests.get(search_url, headers=headers, impersonate="chrome120", timeout=5)
+        response = requests.get(search_url, headers=headers, impersonate="chrome120", timeout=10)
         if response.status_code == 200:
             soup = BeautifulSoup(response.text, 'html.parser')
             products = soup.select("a[class*='ProductItem']") or soup.select("li[class*='ProductList']") or soup.select("a[href*='/goods']")
@@ -183,15 +218,14 @@ def fetch_baemin_price(product_name, spec):
                     nums = re.findall(r'[\d,]+', price_el.text)
                     if nums:
                         raw_price = int(nums[0].replace(",", ""))
-                        single_price, is_matched, ai_shipping = analyze_product_with_gemini(
+                        calculated_price, is_matched, ai_shipping = analyze_product_with_gemini(
                             product_name, spec, title_text, raw_price, raw_shipping_text=first_prod.text[:200]
                         )
                         
                         if is_matched:
-                            total_price = int(single_price * target_qty)
                             href = first_prod.get('href', '')
                             product_link = f"https://mart.baemin.com{href}" if href.startswith('/') else search_url
-                            return "배민상회", total_price, ai_shipping, product_link
+                            return "배민상회", calculated_price, ai_shipping, product_link
 
     except Exception as e:
         pass
@@ -204,7 +238,6 @@ def fetch_baemin_price(product_name, spec):
 def fetch_naver_price(product_name, spec):
     clean_p = product_name.replace("*", " ").strip()
     clean_s = spec.replace("*", " ").strip()
-    target_qty = extract_pack_quantity(spec)
     
     search_query = clean_p if re.search(r'\d+\s*(g|kg|l|ml|ea)', clean_p, re.IGNORECASE) else f"{clean_p} {clean_s}".strip()
     encoded_query = requests.utils.quote(search_query)
@@ -216,7 +249,7 @@ def fetch_naver_price(product_name, spec):
     }
 
     try:
-        response = requests.get(search_url, headers=headers, impersonate="chrome120", timeout=5)
+        response = requests.get(search_url, headers=headers, impersonate="chrome120", timeout=10)
         if response.status_code == 200:
             soup = BeautifulSoup(response.text, 'html.parser')
             products = soup.select("div[class*='product_item']") or soup.select("li[class*='basicList_item']")
@@ -233,15 +266,14 @@ def fetch_naver_price(product_name, spec):
                 ship_text = ship_el.text.strip() if ship_el else ""
 
                 if raw_price > 0:
-                    single_price, is_matched, ai_shipping = analyze_product_with_gemini(
+                    calculated_price, is_matched, ai_shipping = analyze_product_with_gemini(
                         product_name, spec, title_text, raw_price, raw_shipping_text=ship_text
                     )
                     
                     if is_matched:
-                        total_price = int(single_price * target_qty)
                         href = title_el.get('href', '') if title_el else ""
                         product_link = href if href.startswith("http") else search_url
-                        return "네이버쇼핑", total_price, ai_shipping, product_link
+                        return "네이버쇼핑", calculated_price, ai_shipping, product_link
 
     except Exception as e:
         pass
@@ -254,7 +286,6 @@ def fetch_naver_price(product_name, spec):
 def fetch_coupang_price(product_name, spec):
     clean_p = product_name.replace("*", " ").strip()
     clean_s = spec.replace("*", " ").strip()
-    target_qty = extract_pack_quantity(spec)
     
     search_query = clean_p if re.search(r'\d+\s*(g|kg|l|ml|ea)', clean_p, re.IGNORECASE) else f"{clean_p} {clean_s}".strip()
     encoded_query = requests.utils.quote(search_query)
@@ -266,7 +297,7 @@ def fetch_coupang_price(product_name, spec):
     }
 
     try:
-        response = requests.get(search_url, headers=headers, impersonate="chrome120", timeout=5)
+        response = requests.get(search_url, headers=headers, impersonate="chrome120", timeout=10)
         if response.status_code == 200:
             soup = BeautifulSoup(response.text, 'html.parser')
             products = soup.select("li.search-product")
@@ -288,15 +319,14 @@ def fetch_coupang_price(product_name, spec):
                 delivery_text = delivery_el.text.strip() if delivery_el else ""
 
                 if raw_price > 0:
-                    single_price, is_matched, ai_shipping = analyze_product_with_gemini(
+                    calculated_price, is_matched, ai_shipping = analyze_product_with_gemini(
                         product_name, spec, title_text, raw_price, raw_shipping_text=delivery_text
                     )
                     
                     if is_matched:
-                        total_price = int(single_price * target_qty)
                         href = first_prod.select_one("a").get('href', '') if first_prod.select_one("a") else ""
                         product_link = f"https://www.coupang.com{href}" if href.startswith('/') else search_url
-                        return "쿠팡", total_price, ai_shipping, product_link
+                        return "쿠팡", calculated_price, ai_shipping, product_link
 
     except Exception as e:
         pass
@@ -332,7 +362,7 @@ def run_price_update():
         total_rows = len(all_rows)
 
         print("==================================================", flush=True)
-        print(f"🚀 [다나와 / 배민상회 / 네이버 / 쿠팡 4대 채널 통합 수집 가동] 총 {total_rows}개 행 조사를 시작합니다.", flush=True)
+        print(f"🚀 [총 중량 비례 환산 적용] 총 {total_rows}개 행 조사를 시작합니다.", flush=True)
         print("==================================================\n", flush=True)
 
         batch_data = []
@@ -355,7 +385,6 @@ def run_price_update():
                 batch_data.append(orig_j_to_s)
                 continue
 
-            # 🌐 4개 채널 동시 크롤링 실행
             results = [
                 fetch_danawa_price(product_name, spec),
                 fetch_baemin_price(product_name, spec),
@@ -363,14 +392,12 @@ def run_price_update():
                 fetch_coupang_price(product_name, spec)
             ]
 
-            # 가격이 0보다 큰 유효 결과만 필터링 후 가장 저렴한 최저가 선택
             valid_results = [r for r in results if r[1] > 0]
 
             if valid_results:
-                # 최저가 순 정렬
                 valid_results.sort(key=lambda x: x[1])
                 best_channel, best_price, best_shipping, best_link = valid_results[0]
-                print(f"  🏆 [최저가 확정] 채널: {best_channel} | 가격: {best_price:,}원 | 배송비: {best_shipping if best_shipping else '무료/없음'}", flush=True)
+                print(f"  🏆 [최저가 확정] 채널: {best_channel} | 최종 환산가: {best_price:,}원 | 배송비: {best_shipping if best_shipping else '무료/없음'}", flush=True)
             else:
                 best_channel, best_price, best_shipping, best_link = "검색결과없음", 0, "", "-"
                 print(f"  ⚠️ [검색 결과 없음] 4개 채널에서 모두 제품을 찾지 못했습니다.", flush=True)
@@ -384,13 +411,13 @@ def run_price_update():
             row_update[9] = link_formula
 
             batch_data.append(row_update)
-            time.sleep(0.3)
+            time.sleep(0.5)
 
         print("\n📤 [시트 반영 중] 수집된 전체 최저가 데이터를 구글 시트에 일괄 기록합니다...", flush=True)
         cell_range = f"J3:S{total_rows}"
         safe_batch_update(worksheet, cell_range, batch_data)
 
-        print("🎉 4대 채널(다나와/배민상회/네이버/쿠팡) 통합 최저가 수집 및 시트 업데이트가 완료되었습니다!", flush=True)
+        print("🎉 모든 총 중량 비례 환산 및 시트 일괄 업데이트가 완료되었습니다!", flush=True)
 
     except Exception as e:
         print(f"❌ 오류 발생: {str(e)}", flush=True)
