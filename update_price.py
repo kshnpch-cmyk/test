@@ -10,14 +10,10 @@ from curl_cffi import requests
 
 def extract_keywords(product_name, spec):
     """
-    품목명과 규격에서 핵심 검색 단어(브랜드, 품목, 용량 등)를 세분화하여 추출합니다.
+    품목명과 규격에서 핵심 검색 단어(브랜드, 품목, 용량 등)를 추출합니다.
     """
     combined = f"{product_name} {spec}".lower()
-    
-    # 용량 단위 (920g, 1l, 5kg 등)
     capacities = re.findall(r'\d+\s*(?:g|kg|l|ml|ea)', combined)
-    
-    # 한글, 영문, 숫자 단어 추출
     words = re.findall(r'[가-힣a-zA-Z0-9]+', combined)
     
     required = set()
@@ -30,10 +26,10 @@ def extract_keywords(product_name, spec):
 
     return required
 
-def fetch_danawa_price_with_fallback(product_name, spec):
+def fetch_danawa_price_single(product_name, spec):
     """
-    1차: 모든 키워드가 100% 완전 일치하는 본품 검색
-    2차 (실패 시): 유사/대체 상품 검색
+    다나와에서 묶음/박스 상품을 걸러내고 순수 '단품 1개' 최저가와 링크를 수집합니다.
+    1차: 완전일치 단품 -> 2차: 유사 단품
     """
     clean_p = product_name.replace("*", " ").strip()
     clean_s = spec.replace("*", " ").strip()
@@ -43,10 +39,8 @@ def fetch_danawa_price_with_fallback(product_name, spec):
     else:
         search_query = f"{clean_p} {clean_s}".strip()
 
-    print(f"  [다나와 수집 시작] 검색어: '{search_query}'")
-    
+    print(f"  [조사 요청] 검색어: '{search_query}'")
     required_keywords = extract_keywords(product_name, spec)
-    print(f"  └─ 🔍 1차 완전일치 검증 키워드: {list(required_keywords)}")
 
     encoded_query = requests.utils.quote(search_query)
     search_url = f"https://search.danawa.com/dsearch.php?k1={encoded_query}&module=goods&act=dispMain"
@@ -68,8 +62,11 @@ def fetch_danawa_price_with_fallback(product_name, spec):
             target_product = None
             is_exact_match = False
 
+            # 📌 묶음/박스 상품 제외용 키워드 블랙리스트
+            bundle_blacklist = ['박스', 'box', '개입', '묶음', '세트', '팩']
+
             # ----------------------------------------------------
-            # 📌 1단계 시도: 모든 키워드가 100% 들어간 '완전 일치' 상품 탐색
+            # 1단계 시도: '완전일치' 단품 탐색 (묶음 키워드 제외)
             # ----------------------------------------------------
             for prod in products:
                 title_el = prod.select_one("p.prod_name a")
@@ -79,31 +76,34 @@ def fetch_danawa_price_with_fallback(product_name, spec):
                 title_text = title_el.text.strip()
                 title_lower = title_text.lower().replace(" ", "")
 
+                # 묶음 상품(예: 4개입, 박스) 필터링
+                if any(b_kw in title_lower for b_kw in bundle_blacklist) and not any(b_kw in search_query.lower() for b_kw in bundle_blacklist):
+                    continue
+
                 if all(kw in title_lower for kw in required_keywords):
                     target_product = prod
                     is_exact_match = True
-                    print(f"  └─ 🎯 [1차 성공] 완전일치 본품 매칭: '{title_text}'")
+                    print(f"  └─ 🎯 [1차 완전일치 단품]: '{title_text}'")
                     break
 
             # ----------------------------------------------------
-            # 📌 2단계 시도: 완전 일치가 없을 경우 '유사 상품' 탐색 (Fallback)
+            # 2단계 시도: 완전일치 단품 실패 시 '유사 단품' 탐색
             # ----------------------------------------------------
             if not target_product and products:
-                print("  └─ ⚠️ [1차 완전일치 실패] 2차 유사 상품 탐색으로 전환합니다.")
                 for prod in products:
                     title_el = prod.select_one("p.prod_name a")
                     if title_el:
                         target_product = prod
-                        print(f"  └─ 🔍 [2차 성공] 유사/대체 상품 매칭: '{title_el.text.strip()}'")
+                        print(f"  └─ 🔍 [2차 유사 단품]: '{title_el.text.strip()}'")
                         break
 
             # 상품 추출 처리
             if target_product:
-                # 1. 판매가 (K열)
+                # 1. 판매가 (K열) - 단품 최저가 추출
                 price_el = target_product.select_one("p.price_sect a strong") or target_product.select_one("span.num")
                 sale_price = int(re.sub(r'[^\d]', '', price_el.text)) if price_el else 0
 
-                # 2. 판매채널 (J열) - 유사 상품인 경우 안내 표시 선택 가능
+                # 2. 판매채널 (J열)
                 channel_el = target_product.select_one("div.memory_sect p.memory_mall") or target_product.select_one("p.mall_name")
                 mall_text = channel_el.text.strip() if (channel_el and channel_el.text.strip()) else "다나와"
                 channel_name = mall_text if is_exact_match else f"{mall_text}(유사)"
@@ -133,13 +133,13 @@ def fetch_danawa_price_with_fallback(product_name, spec):
                     return channel_name, sale_price, shipping_fee, product_link
 
     except Exception as e:
-        print(f"  ❌ 수집 예외: {e}")
+        print(f"  ❌ 다나와 수집 예외: {e}")
 
     return None, None, None, None
 
 def run_price_update():
     try:
-        # 1. 구글 인증 (GCP_TOKEN_JSON)
+        # 1. 구글 인증
         token_secret = os.environ.get('GCP_TOKEN_JSON')
         if not token_secret:
             raise ValueError("❌ GitHub Secret에 'GCP_TOKEN_JSON'이 설정되지 않았습니다.")
@@ -161,18 +161,23 @@ def run_price_update():
         doc = gc.open_by_url(sheet_url)
         worksheet = doc.get_worksheet(0)
 
+        # 전체 시트 데이터 로드
+        all_rows = worksheet.get_all_values()
+        total_rows = len(all_rows)
+
         print("==================================================")
-        print("📊 [우선순위 단계별 수집 가동] 3행부터 10행까지 조사를 진행합니다.")
+        print(f"📊 [200개 전체 품목 수집 가동] 총 {total_rows}개 행을 처리합니다.")
         print("==================================================\n")
 
-        for row_num in range(3, 11):
-            row_values = worksheet.row_values(row_num)
-            
+        # 3행부터 끝행까지 순회 (1-indexed 기준: row_idx = 3)
+        for row_idx in range(3, total_rows + 1):
+            row_values = all_rows[row_idx - 1] if (row_idx - 1) < len(all_rows) else []
+
             product_name = row_values[2] if len(row_values) >= 3 else ""  # C열 (품목명)
             spec = row_values[3] if len(row_values) >= 4 else ""          # D열 (규격)
             category = row_values[8] if len(row_values) >= 9 else ""      # I열 (구분)
 
-            print(f"▶ [{row_num}행] 품목: '{product_name}' | 규격: '{spec}' | 구분(I열): '{category}'")
+            print(f"▶ [{row_idx}/{total_rows}행] 품목: '{product_name}' | 규격: '{spec}' | 구분(I열): '{category}'")
 
             # 스킵 조건: I열(구분)에 '전용', '예산', '종료'가 포함된 경우
             if any(skip_word in category for skip_word in ['전용', '예산', '종료']):
@@ -183,28 +188,34 @@ def run_price_update():
                 print(f"  ⏭️ 스킵됨 (품목명 없음)\n")
                 continue
 
-            # 수집 가동 (1차: 완전일치 -> 2차: 유사상품)
-            channel, price, shipping, link = fetch_danawa_price_with_fallback(product_name, spec)
+            # 다나와 수집
+            channel, price, shipping, link = fetch_danawa_price_single(product_name, spec)
 
             if not channel or price == 0:
                 channel, price, shipping, link = "검색결과없음", 0, "-", "-"
 
-            # 시트 업데이트
-            worksheet.update_cell(row_num, 10, channel)   # J열: 판매채널
-            worksheet.update_cell(row_num, 11, price)     # K열: 판매가
-            worksheet.update_cell(row_num, 12, shipping)  # L열: 택배비
+            # 구글 시트 업데이트 (J=10, K=11, L=12, S=19)
+            worksheet.update_cell(row_idx, 10, channel)
+            worksheet.update_cell(row_idx, 11, price)
+            worksheet.update_cell(row_idx, 12, shipping)
 
-            # S열(19): 상품 링크 입력
             if link and link != "-":
                 hyperlink_formula = f'=HYPERLINK("{link}", "링크보기")'
-                worksheet.update_cell(row_num, 19, hyperlink_formula)
+                worksheet.update_cell(row_idx, 19, hyperlink_formula)
             else:
-                worksheet.update_cell(row_num, 19, "-")
+                worksheet.update_cell(row_idx, 19, "-")
 
-            print(f"  ✔ [완료] J={channel} | K={price:,}원 | L={shipping} | S=링크입력완료\n")
-            time.sleep(2.0)
+            print(f"  ✔ [완료] J={channel} | K={price:,}원 | L={shipping} | S=링크완료\n")
 
-        print("🎉 단계별 정밀 수집 및 구글 시트 업데이트가 완벽히 완료되었습니다!")
+            # 구글 API 과부하 방지 및 안정적인 연속 조회를 위한 대기시간
+            time.sleep(1.8)
+
+            # 50개 단위로 5초 휴식 (Quota 방지)
+            if row_idx % 50 == 0:
+                print("  💤 API 요청 안정화를 위해 5초간 대기합니다...\n")
+                time.sleep(5)
+
+        print("🎉 200개 전체 품목 가격 수집 및 구글 시트 업데이트가 완료되었습니다!")
 
     except Exception as e:
         print(f"❌ 오류 발생: {str(e)}")
