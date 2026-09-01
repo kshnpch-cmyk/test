@@ -8,15 +8,41 @@ from google.oauth2.credentials import Credentials
 from google.auth.transport.requests import Request
 from bs4 import BeautifulSoup
 from curl_cffi import requests
+from tenacity import retry, stop_after_attempt, wait_exponential, retry_if_exception_type
 
 # Gemini API 클라이언트 초기화
 gemini_api_key = os.environ.get('GEMINI_API_KEY')
 ai_client = genai.Client(api_key=gemini_api_key) if gemini_api_key else None
 
+# 구글 API 503/네트워크 에러 발생 시 자동 재시도 데코레이터
+@retry(
+    stop=stop_after_attempt(5),
+    wait=wait_exponential(multiplier=2, min=3, max=30),
+    retry_if_exception_type(gspread.exceptions.APIError)
+)
+def safe_open_sheet(gc, sheet_url):
+    """503 에러 발생 시 지연 후 재시도하여 시트를 안전하게 엽니다."""
+    return gc.open_by_url(sheet_url)
+
+@retry(
+    stop=stop_after_attempt(5),
+    wait=wait_exponential(multiplier=1.5, min=2, max=15),
+    retry_if_exception_type(gspread.exceptions.APIError)
+)
+def safe_update_cells(worksheet, row_idx, channel, price, shipping, link):
+    """503 에러 발생 시 지연 후 재시도하여 셀을 업데이트합니다."""
+    worksheet.update_cell(row_idx, 10, channel)   # J열
+    worksheet.update_cell(row_idx, 11, price)     # K열
+    worksheet.update_cell(row_idx, 12, shipping)  # L열
+
+    if link and link != "-":
+        hyperlink_formula = f'=HYPERLINK("{link}", "링크보기")'
+        worksheet.update_cell(row_idx, 19, hyperlink_formula)
+    else:
+        worksheet.update_cell(row_idx, 19, "-")
+
 def analyze_product_with_gemini(sheet_product, sheet_spec, crawled_title, crawled_price, raw_shipping_text=""):
-    """
-    Gemini AI를 호출하여 묶음 수량, 단가, 배송비를 정밀 분석합니다.
-    """
+    """Gemini AI를 호출하여 묶음 수량, 단가, 배송비를 정밀 분석합니다."""
     if not ai_client:
         return crawled_price, True, ""
 
@@ -35,9 +61,9 @@ def analyze_product_with_gemini(sheet_product, sheet_spec, crawled_title, crawle
 
 다음 질문에 맞춰 오직 JSON 형식으로만 응답해:
 1. "is_matched": 검색된 상품이 구글 시트 요청 품목과 동일한 종류의 상품인지 여부 (true/false)
-2. "crawled_unit_qty": 검색된 상품명(예: '1kg (3개)') 속에 포함된 제품 개수 (숫자만, 예: 3). 단품이면 1
+2. "crawled_unit_qty": 검색된 상품명 속 제품 개수 (숫자만, 예: 3). 단품이면 1
 3. "single_unit_price": 검색된 표시 가격을 개수로 나눈 '1개당 단가' (숫자만)
-4. "shipping_fee": 배송비 금액 (무료배송이거나 정보가 없으면 "", 배송비가 있으면 '3,000원' 형태)
+4. "shipping_fee": 배송비 금액 (무료배송/정보없음 "", 배송비가 있으면 '3,000원' 형태)
 5. "reason": 판단 이유 요약
 
 응답 형식(JSON):
@@ -83,16 +109,11 @@ def extract_pack_quantity(spec_text):
     return 1
 
 def parse_shipping_from_html(prod_element):
-    """
-    HTML 상품 요소 전체 텍스트에서 배송비를 정규식으로 직접 파싱합니다.
-    """
+    """HTML 요소에서 배송비를 파싱합니다."""
     full_text = prod_element.text.strip()
-    
-    # 무료배송 체크
     if "무료" in full_text and "배송" in full_text:
         return ""
 
-    # 배송비 3,000원, 배송 2,500원 등 추출
     match = re.search(r'(?:배송비|택배비|배송)\s*([\d,]+)\s*원', full_text)
     if match:
         fee_str = match.group(1).replace(",", "")
@@ -131,11 +152,9 @@ def fetch_danawa_price(product_name, spec):
                 price_el = first_prod.select_one("p.price_sect a strong") or first_prod.select_one("span.num")
                 raw_price = int(re.sub(r'[^\d]', '', price_el.text)) if price_el else 0
 
-                # 1차 HTML 정규식 배송비 수집
                 raw_shipping = parse_shipping_from_html(first_prod)
 
                 if raw_price > 0:
-                    # 🤖 Gemini AI 검증 및 배송비 재확인
                     single_price, is_matched, ai_shipping = analyze_product_with_gemini(
                         product_name, spec, title_text, raw_price, raw_shipping_text=first_prod.text[:200]
                     )
@@ -229,22 +248,24 @@ def run_price_update():
         gc = gspread.authorize(credentials)
 
         sheet_url = "https://docs.google.com/spreadsheets/d/1nA0ZtCztY6Qe8UR8-erB98_BIZDYUUjpIQYWNyuePWA/edit"
-        doc = gc.open_by_url(sheet_url)
+        
+        # 📌 503 에러 대비 재시도 적용 시트 로드
+        doc = safe_open_sheet(gc, sheet_url)
         worksheet = doc.get_worksheet(0)
 
         all_rows = worksheet.get_all_values()
         total_rows = len(all_rows)
 
         print("==================================================")
-        print(f"📊 [배송비 수집 보완 가동] 총 {total_rows}개 행 수집을 시작합니다.")
+        print(f"📊 [503 오류 방지 재시도 탑재] 총 {total_rows}개 행 수집을 시작합니다.")
         print("==================================================\n")
 
         for row_idx in range(3, total_rows + 1):
             row_values = all_rows[row_idx - 1] if (row_idx - 1) < len(all_rows) else []
 
-            product_name = row_values[2] if len(row_values) >= 3 else ""  # C열
-            spec = row_values[3] if len(row_values) >= 4 else ""          # D열
-            category = row_values[8] if len(row_values) >= 9 else ""      # I열
+            product_name = row_values[2] if len(row_values) >= 3 else ""
+            spec = row_values[3] if len(row_values) >= 4 else ""
+            category = row_values[8] if len(row_values) >= 9 else ""
 
             print(f"▶ [{row_idx}/{total_rows}행] 품목: '{product_name}' | 규격: '{spec}' | 구분: '{category}'")
 
@@ -256,13 +277,9 @@ def run_price_update():
                 print(f"  ⏭️ 스킵됨 (품목명 없음)\n")
                 continue
 
-            # 1. 다나와 수집
             d_channel, d_price, d_shipping, d_link = fetch_danawa_price(product_name, spec)
-            
-            # 2. 배민상회 수집
             b_channel, b_price, b_shipping, b_link = fetch_baemin_price(product_name, spec)
 
-            # 3. 최저가 채널 결정
             final_channel, final_price, final_shipping, final_link = d_channel, d_price, d_shipping, d_link
 
             if b_price > 0 and (d_price == 0 or b_price < d_price):
@@ -274,16 +291,8 @@ def run_price_update():
             if final_price == 0:
                 final_channel, final_price, final_shipping, final_link = "검색결과없음", 0, "", "-"
 
-            # 구글 시트 업데이트
-            worksheet.update_cell(row_idx, 10, final_channel)   # J열
-            worksheet.update_cell(row_idx, 11, final_price)     # K열
-            worksheet.update_cell(row_idx, 12, final_shipping)  # L열
-
-            if final_link and final_link != "-":
-                hyperlink_formula = f'=HYPERLINK("{final_link}", "링크보기")'
-                worksheet.update_cell(row_idx, 19, hyperlink_formula)
-            else:
-                worksheet.update_cell(row_idx, 19, "-")
+            # 📌 503 에러 대비 재시도 적용 셀 업데이트
+            safe_update_cells(worksheet, row_idx, final_channel, final_price, final_shipping, final_link)
 
             disp_shipping = final_shipping if final_shipping else "공란(무료/없음)"
             print(f"  ✔ [완료] 최종채널={final_channel} | 최저가={final_price:,}원 | 배송비={disp_shipping}\n")
@@ -294,7 +303,7 @@ def run_price_update():
                 print("  💤 API 요청 안정화를 위해 5초간 대기합니다...\n")
                 time.sleep(5)
 
-        print("🎉 배송비 수집 보완 및 구글 시트 업데이트가 완벽히 완료되었습니다!")
+        print("🎉 안전하게 모든 최저가 조사가 완료되었습니다!")
 
     except Exception as e:
         print(f"❌ 오류 발생: {str(e)}")
