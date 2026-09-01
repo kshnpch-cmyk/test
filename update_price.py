@@ -14,20 +14,20 @@ from tenacity import retry, stop_after_attempt, wait_exponential, retry_if_excep
 gemini_api_key = os.environ.get('GEMINI_API_KEY')
 ai_client = genai.Client(api_key=gemini_api_key) if gemini_api_key else None
 
-# 구글 API 503/네트워크 에러 발생 시 자동 재시도 데코레이터
+# 📌 문법 오류 수정: 키워드 인자 순서 정렬
 @retry(
+    retry_if_exception_type(gspread.exceptions.APIError),
     stop=stop_after_attempt(5),
-    wait=wait_exponential(multiplier=2, min=3, max=30),
-    retry_if_exception_type(gspread.exceptions.APIError)
+    wait=wait_exponential(multiplier=2, min=3, max=30)
 )
 def safe_open_sheet(gc, sheet_url):
     """503 에러 발생 시 지연 후 재시도하여 시트를 안전하게 엽니다."""
     return gc.open_by_url(sheet_url)
 
 @retry(
+    retry_if_exception_type(gspread.exceptions.APIError),
     stop=stop_after_attempt(5),
-    wait=wait_exponential(multiplier=1.5, min=2, max=15),
-    retry_if_exception_type(gspread.exceptions.APIError)
+    wait=wait_exponential(multiplier=1.5, min=2, max=15)
 )
 def safe_update_cells(worksheet, row_idx, channel, price, shipping, link):
     """503 에러 발생 시 지연 후 재시도하여 셀을 업데이트합니다."""
@@ -257,7 +257,7 @@ def run_price_update():
         total_rows = len(all_rows)
 
         print("==================================================")
-        print(f"📊 [503 오류 방지 재시도 탑재] 총 {total_rows}개 행 수집을 시작합니다.")
+        print(f"📊 [문법 수정 및 자동 재시도 적용] 총 {total_rows}개 행 수집을 시작합니다.")
         print("==================================================\n")
 
         for row_idx in range(3, total_rows + 1):
@@ -303,7 +303,7 @@ def run_price_update():
                 print("  💤 API 요청 안정화를 위해 5초간 대기합니다...\n")
                 time.sleep(5)
 
-        print("🎉 안전하게 모든 최저가 조사가 완료되었습니다!")
+        print("🎉 오류 없이 성공적으로 모든 조사가 완료되었습니다!")
 
     except Exception as e:
         print(f"❌ 오류 발생: {str(e)}")
