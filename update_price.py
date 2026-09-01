@@ -14,13 +14,23 @@ from tenacity import retry, stop_after_attempt, wait_exponential, retry_if_excep
 gemini_api_key = os.environ.get('GEMINI_API_KEY')
 ai_client = genai.Client(api_key=gemini_api_key) if gemini_api_key else None
 
+# 📌 retry= 인자를 명시하여 무한 대기(Hang) 버그 수정
 @retry(
-    retry_if_exception_type(gspread.exceptions.APIError),
+    retry=retry_if_exception_type(gspread.exceptions.APIError),
     stop=stop_after_attempt(5),
     wait=wait_exponential(multiplier=2, min=3, max=30)
 )
 def safe_open_sheet(gc, sheet_url):
     return gc.open_by_url(sheet_url)
+
+@retry(
+    retry=retry_if_exception_type(gspread.exceptions.APIError),
+    stop=stop_after_attempt(5),
+    wait=wait_exponential(multiplier=2, min=3, max=30)
+)
+def safe_batch_update(worksheet, cell_range, values_matrix):
+    """200개 행의 데이터를 한 번의 API 요청으로 시트에 일괄 업데이트합니다."""
+    worksheet.update(cell_range, values_matrix, raw=False)
 
 def analyze_product_with_gemini(sheet_product, sheet_spec, crawled_title, crawled_price, raw_shipping_text=""):
     if not ai_client:
@@ -115,7 +125,7 @@ def fetch_danawa_price(product_name, spec):
     }
 
     try:
-        response = requests.get(search_url, headers=headers, impersonate="chrome120", timeout=8)
+        response = requests.get(search_url, headers=headers, impersonate="chrome120", timeout=6)
         
         if response.status_code == 200:
             soup = BeautifulSoup(response.text, 'html.parser')
@@ -169,7 +179,7 @@ def fetch_baemin_price(product_name, spec):
     }
 
     try:
-        response = requests.get(search_url, headers=headers, impersonate="chrome120", timeout=8)
+        response = requests.get(search_url, headers=headers, impersonate="chrome120", timeout=6)
         
         if response.status_code == 200:
             soup = BeautifulSoup(response.text, 'html.parser')
@@ -231,13 +241,20 @@ def run_price_update():
         total_rows = len(all_rows)
 
         print("==================================================", flush=True)
-        print(f"📊 [속도 최적화 배치 수집 가동] 총 {total_rows}개 행 수집을 시작합니다.", flush=True)
+        print(f"🚀 [초고속 일괄 배치 업데이트 가동] 총 {total_rows}개 행 조사를 시작합니다.", flush=True)
         print("==================================================\n", flush=True)
 
-        # 구글 시트에 일괄 업데이트할 데이터를 담을 리스트
-        # (J열~S열 범위 업데이트용)
+        # 구글 시트에 업데이트할 J열~S열 데이터를 저장할 2차원 리스트
+        # 각 행: [J(채널), K(가격), L(택배비), M, N, O, P, Q, R, S(링크)] -> 총 10개 열
+        batch_data = []
+
         for row_idx in range(3, total_rows + 1):
             row_values = all_rows[row_idx - 1] if (row_idx - 1) < len(all_rows) else []
+
+            # 기존 J~S열 데이터 원본 백업
+            orig_j_to_s = row_values[9:19] if len(row_values) >= 19 else [""] * 10
+            while len(orig_j_to_s) < 10:
+                orig_j_to_s.append("")
 
             product_name = row_values[2] if len(row_values) >= 3 else ""
             spec = row_values[3] if len(row_values) >= 4 else ""
@@ -245,12 +262,9 @@ def run_price_update():
 
             print(f"▶ [{row_idx}/{total_rows}행] 품목: '{product_name}' | 규격: '{spec}' | 구분: '{category}'", flush=True)
 
-            if any(skip_word in category for skip_word in ['전용', '예산', '종료']):
-                print(f"  ⏭️ 스킵됨 (구분 조건 제외: '{category}')\n", flush=True)
-                continue
-
-            if not product_name.strip():
-                print(f"  ⏭️ 스킵됨 (품목명 없음)\n", flush=True)
+            if any(skip_word in category for skip_word in ['전용', '예산', '종료']) or not product_name.strip():
+                print(f"  ⏭️ 스킵됨", flush=True)
+                batch_data.append(orig_j_to_s)
                 continue
 
             d_channel, d_price, d_shipping, d_link = fetch_danawa_price(product_name, spec)
@@ -267,22 +281,28 @@ def run_price_update():
             if final_price == 0:
                 final_channel, final_price, final_shipping, final_link = "검색결과없음", 0, "", "-"
 
-            # 개별 셀 업데이트 (J, K, L, S열)
             link_formula = f'=HYPERLINK("{final_link}", "링크보기")' if (final_link and final_link != "-") else "-"
-            
-            # 셀 업데이트
-            worksheet.update_cell(row_idx, 10, final_channel)   # J열
-            worksheet.update_cell(row_idx, 11, final_price)     # K열
-            worksheet.update_cell(row_idx, 12, final_shipping)  # L열
-            worksheet.update_cell(row_idx, 19, link_formula)     # S열
+
+            # J~S열 업데이트할 데이터 구성 (J:0, K:1, L:2, S:9)
+            row_update = list(orig_j_to_s)
+            row_update[0] = final_channel
+            row_update[1] = final_price
+            row_update[2] = final_shipping
+            row_update[9] = link_formula
+
+            batch_data.append(row_update)
 
             disp_shipping = final_shipping if final_shipping else "공란(무료/없음)"
             print(f"  ✔ [완료] 최종채널={final_channel} | 최저가={final_price:,}원 | 배송비={disp_shipping}\n", flush=True)
 
-            # 웹서버 대기시간을 1초로 단축하여 빠른 수집
-            time.sleep(1.0)
+            time.sleep(0.3)
 
-        print("🎉 모든 최저가 조사가 성공적으로 완료되었습니다!", flush=True)
+        # 📌 조사 완료 후 시트 전체 일괄 업데이트 (J3:S{total_rows})
+        print("\n📤 [시트 반영 중] 수집된 전체 최저가 데이터를 구글 시트에 일괄 기록합니다...", flush=True)
+        cell_range = f"J3:S{total_rows}"
+        safe_batch_update(worksheet, cell_range, batch_data)
+
+        print("🎉 모든 최저가 조사 및 시트 일괄 업데이트가 완료되었습니다!", flush=True)
 
     except Exception as e:
         print(f"❌ 오류 발생: {str(e)}", flush=True)
