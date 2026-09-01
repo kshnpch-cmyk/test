@@ -14,7 +14,6 @@ from tenacity import retry, stop_after_attempt, wait_exponential, retry_if_excep
 gemini_api_key = os.environ.get('GEMINI_API_KEY')
 ai_client = genai.Client(api_key=gemini_api_key) if gemini_api_key else None
 
-# 📌 retry= 인자를 명시하여 무한 대기(Hang) 버그 수정
 @retry(
     retry=retry_if_exception_type(gspread.exceptions.APIError),
     stop=stop_after_attempt(5),
@@ -67,8 +66,9 @@ def analyze_product_with_gemini(sheet_product, sheet_spec, crawled_title, crawle
 """
 
     try:
+        # 📌 최신 지원 모델 gemini-3.6-flash 로 업데이트
         response = ai_client.models.generate_content(
-            model='gemini-2.5-flash',
+            model='gemini-3.6-flash',
             contents=prompt,
             config={'response_mime_type': 'application/json'}
         )
@@ -241,17 +241,14 @@ def run_price_update():
         total_rows = len(all_rows)
 
         print("==================================================", flush=True)
-        print(f"🚀 [초고속 일괄 배치 업데이트 가동] 총 {total_rows}개 행 조사를 시작합니다.", flush=True)
+        print(f"🚀 [gemini-3.6-flash 적용 완료] 총 {total_rows}개 행 조사를 시작합니다.", flush=True)
         print("==================================================\n", flush=True)
 
-        # 구글 시트에 업데이트할 J열~S열 데이터를 저장할 2차원 리스트
-        # 각 행: [J(채널), K(가격), L(택배비), M, N, O, P, Q, R, S(링크)] -> 총 10개 열
         batch_data = []
 
         for row_idx in range(3, total_rows + 1):
             row_values = all_rows[row_idx - 1] if (row_idx - 1) < len(all_rows) else []
 
-            # 기존 J~S열 데이터 원본 백업
             orig_j_to_s = row_values[9:19] if len(row_values) >= 19 else [""] * 10
             while len(orig_j_to_s) < 10:
                 orig_j_to_s.append("")
@@ -283,7 +280,6 @@ def run_price_update():
 
             link_formula = f'=HYPERLINK("{final_link}", "링크보기")' if (final_link and final_link != "-") else "-"
 
-            # J~S열 업데이트할 데이터 구성 (J:0, K:1, L:2, S:9)
             row_update = list(orig_j_to_s)
             row_update[0] = final_channel
             row_update[1] = final_price
@@ -297,7 +293,6 @@ def run_price_update():
 
             time.sleep(0.3)
 
-        # 📌 조사 완료 후 시트 전체 일괄 업데이트 (J3:S{total_rows})
         print("\n📤 [시트 반영 중] 수집된 전체 최저가 데이터를 구글 시트에 일괄 기록합니다...", flush=True)
         cell_range = f"J3:S{total_rows}"
         safe_batch_update(worksheet, cell_range, batch_data)
