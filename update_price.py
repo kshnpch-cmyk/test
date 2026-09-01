@@ -11,6 +11,7 @@ from bs4 import BeautifulSoup
 from curl_cffi import requests
 from tenacity import retry, stop_after_attempt, wait_exponential, retry_if_exception_type
 
+# 경고 문구 출력 차단
 warnings.filterwarnings("ignore", category=UserWarning)
 
 gemini_api_key = os.environ.get('GEMINI_API_KEY')
@@ -47,33 +48,6 @@ def call_gemini_api(prompt):
         }
     )
 
-def parse_total_capacity(spec_text):
-    """
-    규격 텍스트(예: '5KG*2EA', '1kg*12개', '500g*10')에서 총 중량/용량(g 또는 ml 단위)을 산출합니다.
-    예: 5KG*2EA -> 10000g | 1kg*12개 -> 12000g
-    """
-    if not spec_text:
-        return 0, 1
-
-    spec_lower = spec_text.lower().replace(" ", "")
-    
-    # 1. 용량과 수량이 포함된 패턴 (예: 5kg*2ea, 500g*10개)
-    match = re.search(r'(\d+(?:\.\d+)?)\s*(kg|g|l|ml)\s*\*?\s*(\d+)?', spec_lower)
-    if match:
-        val = float(match.group(1))
-        unit = match.group(2)
-        qty = int(match.group(3)) if match.group(3) else 1
-
-        # g/ml 기준 단위로 통일
-        if unit in ['kg', 'l']:
-            base_val = val * 1000
-        else:
-            base_val = val
-
-        return base_val * qty, qty
-
-    return 0, 1
-
 def analyze_product_with_gemini(sheet_product, sheet_spec, crawled_title, crawled_price, raw_shipping_text=""):
     if not ai_client:
         return crawled_price, True, ""
@@ -93,8 +67,8 @@ def analyze_product_with_gemini(sheet_product, sheet_spec, crawled_title, crawle
 
 다음 질문에 맞춰 오직 JSON 형식으로만 응답해:
 1. "is_matched": 검색된 상품이 시트 요청 품목과 동일한 종류인지 여부 (true/false)
-2. "crawled_total_capacity_g": 검색된 상품명(예: '1kg (12개)')의 전체 총 용량/중량(g 또는 ml 숫자만, 예: 12kg -> 12000). 모르면 0
-3. "sheet_target_capacity_g": 구글 시트 규격(예: '5KG*2EA')의 전체 목표 총 용량/중량(g 또는 ml 숫자만, 예: 10kg -> 10000). 모르면 0
+2. "crawled_total_capacity_g": 검색된 상품명의 전체 총 용량/중량(g 또는 ml 숫자만, 예: 12kg -> 12000). 모르면 0
+3. "sheet_target_capacity_g": 구글 시트 규격의 전체 목표 총 용량/중량(g 또는 ml 숫자만, 예: 10kg -> 10000). 모르면 0
 4. "shipping_fee": 배송비 금액 (무료/로켓배송/정보없음은 "", 유료배송비면 '3,000원' 형태)
 5. "reason": 판단 및 중량 환산 이유 요약
 
@@ -119,7 +93,6 @@ def analyze_product_with_gemini(sheet_product, sheet_spec, crawled_title, crawle
         shipping_fee = result.get("shipping_fee", "")
         reason = result.get("reason", "")
 
-        # 📌 총 용량/중량 비례 환산 계산 (51,020원 / 12kg * 10kg = 42,516원)
         final_calculated_price = crawled_price
         if crawled_g > 0 and target_g > 0:
             final_calculated_price = int((crawled_price / crawled_g) * target_g)
@@ -133,204 +106,208 @@ def analyze_product_with_gemini(sheet_product, sheet_spec, crawled_title, crawle
         print(f"  ❌ Gemini 분석 예외: {e}", flush=True)
         return crawled_price, True, ""
 
+def fetch_direct_url_price(target_url, product_name, spec):
+    """📌 T열에 지정된 URL 페이지에 직접 접속하여 가격/배송비를 파싱합니다."""
+    headers = {
+        "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36",
+        "Referer": "https://www.google.com/"
+    }
+
+    try:
+        response = requests.get(target_url, headers=headers, impersonate="chrome120", timeout=12)
+        if response.status_code == 200:
+            soup = BeautifulSoup(response.text, 'html.parser')
+            
+            # 제목 파싱
+            title_el = (
+                soup.select_one("h3.prod_tit") or 
+                soup.select_one("h2.prod_title") or 
+                soup.select_one("h1") or 
+                soup.select_one("title")
+            )
+            title_text = title_el.text.strip() if title_el else product_name
+
+            # 가격 파싱 (다나와/쿠팡/네이버/일반 쇼핑몰 공통 정규식)
+            price_el = (
+                soup.select_one("span.prc_c") or 
+                soup.select_one("strong.price-value") or 
+                soup.select_one("span.price_num") or 
+                soup.select_one("em.num")
+            )
+            
+            raw_price = 0
+            if price_el:
+                nums = re.findall(r'[\d,]+', price_el.text)
+                if nums:
+                    raw_price = int(nums[0].replace(",", ""))
+
+            if raw_price == 0:
+                # 전체 HTML 텍스트에서 금액 패턴 스캔
+                matches = re.findall(r'(?:판매가|최저가|가격)\s*:?\s*([\d,]+)\s*원', response.text)
+                if matches:
+                    raw_price = int(matches[0].replace(",", ""))
+
+            # 배송비 파싱
+            ship_matches = re.findall(r'(?:배송비|택배비)\s*:?\s*([\d,]+)\s*원', response.text)
+            ship_text = f"배송비: {ship_matches[0]}원" if ship_matches else ""
+
+            if raw_price > 0:
+                calculated_price, is_matched, ai_shipping = analyze_product_with_gemini(
+                    product_name, spec, title_text, raw_price, raw_shipping_text=ship_text
+                )
+                
+                channel_name = "지정URL"
+                if "danawa.com" in target_url: channel_name = "다나와(지정)"
+                elif "coupang.com" in target_url: channel_name = "쿠팡(지정)"
+                elif "naver.com" in target_url: channel_name = "네이버(지정)"
+                elif "baemin.com" in target_url: channel_name = "배민상회(지정)"
+
+                return channel_name, calculated_price, ai_shipping, target_url
+
+    except Exception as e:
+        print(f"  ❌ 지정 URL 수집 예외: {e}", flush=True)
+
+    return "지정URL오류", 0, "", target_url
+
 # ----------------------------------------------------
-# 1. 다나와 수집
+# 기존 4대 채널 수집 함수 (다나와 / 배민 / 네이버 / 쿠팡)
 # ----------------------------------------------------
+def extract_pack_quantity(spec_text):
+    if not spec_text: return 1
+    match = re.search(r'\*\s*(\d+)\s*(?:ea|개|팩|box|박스|통|병|개입)?', spec_text, re.IGNORECASE)
+    if match: return int(match.group(1))
+    match_unit = re.search(r'(\d+)\s*(?:ea|개|팩|box|박스|통|병)(?!\w)', spec_text, re.IGNORECASE)
+    if match_unit: return int(match_unit.group(1))
+    return 1
+
 def fetch_danawa_price(product_name, spec):
     clean_p = product_name.replace("*", " ").strip()
     clean_s = spec.replace("*", " ").strip()
-    
     search_query = clean_p if re.search(r'\d+\s*(g|kg|l|ml|ea)', clean_p, re.IGNORECASE) else f"{clean_p} {clean_s}".strip()
     encoded_query = requests.utils.quote(search_query)
     search_url = f"https://search.danawa.com/dsearch.php?k1={encoded_query}&module=goods&act=dispMain"
     
-    headers = {
-        "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36",
-        "Referer": "https://www.danawa.com/"
-    }
-
+    headers = {"User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64)", "Referer": "https://www.danawa.com/"}
     try:
         response = requests.get(search_url, headers=headers, impersonate="chrome120", timeout=10)
         if response.status_code == 200:
             soup = BeautifulSoup(response.text, 'html.parser')
             products = soup.select("li.prod_item:not(.product-pot)")
-            
             if products:
                 first_prod = products[0]
                 title_el = first_prod.select_one("p.prod_name a")
                 title_text = title_el.text.strip() if title_el else ""
-
                 price_el = first_prod.select_one("p.price_sect a strong") or first_prod.select_one("span.num")
                 raw_price = int(re.sub(r'[^\d]', '', price_el.text)) if price_el else 0
-
                 ship_el = first_prod.select_one("span.ship_fee") or first_prod.select_one("td.ship") or first_prod.select_one("span.stxt")
                 ship_text = ship_el.text.strip() if ship_el else ""
 
                 if raw_price > 0:
-                    calculated_price, is_matched, ai_shipping = analyze_product_with_gemini(
-                        product_name, spec, title_text, raw_price, raw_shipping_text=ship_text
-                    )
-                    
+                    calculated_price, is_matched, ai_shipping = analyze_product_with_gemini(product_name, spec, title_text, raw_price, ship_text)
                     if is_matched:
                         channel_el = first_prod.select_one("div.memory_sect p.memory_mall") or first_prod.select_one("p.mall_name")
                         mall_text = channel_el.text.strip() if (channel_el and channel_el.text.strip()) else "다나와"
-
                         link_el = first_prod.select_one("p.prod_name a") or first_prod.select_one("a.thumb_link")
                         href = link_el.get('href') if link_el else ""
                         product_link = f"https:{href}" if href.startswith("//") else (href or search_url)
-
                         return mall_text, calculated_price, ai_shipping, product_link
-
-    except Exception as e:
-        pass
-
+    except: pass
     return "다나와", 0, "", "-"
 
-# ----------------------------------------------------
-# 2. 배민상회 수집
-# ----------------------------------------------------
 def fetch_baemin_price(product_name, spec):
     clean_p = product_name.replace("*", " ").strip()
     clean_s = spec.replace("*", " ").strip()
-    
     search_query = clean_p if re.search(r'\d+\s*(g|kg|l|ml|ea)', clean_p, re.IGNORECASE) else f"{clean_p} {clean_s}".strip()
     encoded_query = requests.utils.quote(search_query)
     search_url = f"https://mart.baemin.com/search?keyword={encoded_query}"
     
-    headers = {
-        "User-Agent": "Mozilla/5.0 (iPhone; CPU iPhone OS 17_4_1 like Mac OS X) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/17.4.1 Mobile/15E148 Safari/604.1",
-        "Referer": "https://mart.baemin.com/"
-    }
-
+    headers = {"User-Agent": "Mozilla/5.0 (iPhone; CPU iPhone OS 17_4_1 like Mac OS X)", "Referer": "https://mart.baemin.com/"}
     try:
         response = requests.get(search_url, headers=headers, impersonate="chrome120", timeout=10)
         if response.status_code == 200:
             soup = BeautifulSoup(response.text, 'html.parser')
             products = soup.select("a[class*='ProductItem']") or soup.select("li[class*='ProductList']") or soup.select("a[href*='/goods']")
-            
             if products:
                 first_prod = products[0]
                 title_el = first_prod.select_one("[class*='title']") or first_prod.select_one("[class*='Name']") or first_prod
                 title_text = title_el.text.strip() if title_el else ""
-
                 price_el = first_prod.select_one("[class*='price']") or first_prod.select_one("span[class*='Price']")
                 if price_el:
                     nums = re.findall(r'[\d,]+', price_el.text)
                     if nums:
                         raw_price = int(nums[0].replace(",", ""))
-                        calculated_price, is_matched, ai_shipping = analyze_product_with_gemini(
-                            product_name, spec, title_text, raw_price, raw_shipping_text=first_prod.text[:200]
-                        )
-                        
+                        calculated_price, is_matched, ai_shipping = analyze_product_with_gemini(product_name, spec, title_text, raw_price, first_prod.text[:200])
                         if is_matched:
                             href = first_prod.get('href', '')
                             product_link = f"https://mart.baemin.com{href}" if href.startswith('/') else search_url
                             return "배민상회", calculated_price, ai_shipping, product_link
-
-    except Exception as e:
-        pass
-
+    except: pass
     return "배민상회", 0, "", "-"
 
-# ----------------------------------------------------
-# 3. 네이버 쇼핑 수집
-# ----------------------------------------------------
 def fetch_naver_price(product_name, spec):
     clean_p = product_name.replace("*", " ").strip()
     clean_s = spec.replace("*", " ").strip()
-    
     search_query = clean_p if re.search(r'\d+\s*(g|kg|l|ml|ea)', clean_p, re.IGNORECASE) else f"{clean_p} {clean_s}".strip()
     encoded_query = requests.utils.quote(search_query)
     search_url = f"https://search.shopping.naver.com/search/all?query={encoded_query}"
     
-    headers = {
-        "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36",
-        "Referer": "https://shopping.naver.com/"
-    }
-
+    headers = {"User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64)", "Referer": "https://shopping.naver.com/"}
     try:
         response = requests.get(search_url, headers=headers, impersonate="chrome120", timeout=10)
         if response.status_code == 200:
             soup = BeautifulSoup(response.text, 'html.parser')
             products = soup.select("div[class*='product_item']") or soup.select("li[class*='basicList_item']")
-            
             if products:
                 first_prod = products[0]
                 title_el = first_prod.select_one("a[class*='product_link']") or first_prod.select_one("a[title]")
                 title_text = title_el.text.strip() if title_el else ""
-
                 price_el = first_prod.select_one("span[class*='price_num']") or first_prod.select_one("em[class*='num']")
                 raw_price = int(re.sub(r'[^\d]', '', price_el.text)) if price_el else 0
-
                 ship_el = first_prod.select_one("span[class*='price_delivery']") or first_prod.select_one("div[class*='delivery']")
                 ship_text = ship_el.text.strip() if ship_el else ""
 
                 if raw_price > 0:
-                    calculated_price, is_matched, ai_shipping = analyze_product_with_gemini(
-                        product_name, spec, title_text, raw_price, raw_shipping_text=ship_text
-                    )
-                    
+                    calculated_price, is_matched, ai_shipping = analyze_product_with_gemini(product_name, spec, title_text, raw_price, ship_text)
                     if is_matched:
                         href = title_el.get('href', '') if title_el else ""
                         product_link = href if href.startswith("http") else search_url
                         return "네이버쇼핑", calculated_price, ai_shipping, product_link
-
-    except Exception as e:
-        pass
-
+    except: pass
     return "네이버쇼핑", 0, "", "-"
 
-# ----------------------------------------------------
-# 4. 쿠팡 수집
-# ----------------------------------------------------
 def fetch_coupang_price(product_name, spec):
     clean_p = product_name.replace("*", " ").strip()
     clean_s = spec.replace("*", " ").strip()
-    
     search_query = clean_p if re.search(r'\d+\s*(g|kg|l|ml|ea)', clean_p, re.IGNORECASE) else f"{clean_p} {clean_s}".strip()
     encoded_query = requests.utils.quote(search_query)
     search_url = f"https://www.coupang.com/np/search?q={encoded_query}"
     
-    headers = {
-        "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36",
-        "Referer": "https://www.coupang.com/"
-    }
-
+    headers = {"User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64)", "Referer": "https://www.coupang.com/"}
     try:
         response = requests.get(search_url, headers=headers, impersonate="chrome120", timeout=10)
         if response.status_code == 200:
             soup = BeautifulSoup(response.text, 'html.parser')
             products = soup.select("li.search-product")
-            
             if products:
                 first_prod = products[0]
                 for prod in products:
                     if not prod.select_one("span.ad-badge"):
                         first_prod = prod
                         break
-
                 title_el = first_prod.select_one("div.name")
                 title_text = title_el.text.strip() if title_el else ""
-
                 price_el = first_prod.select_one("strong.price-value")
                 raw_price = int(re.sub(r'[^\d]', '', price_el.text)) if price_el else 0
-
                 delivery_el = first_prod.select_one("span.delivery-badge") or first_prod.select_one("div.delivery")
                 delivery_text = delivery_el.text.strip() if delivery_el else ""
 
                 if raw_price > 0:
-                    calculated_price, is_matched, ai_shipping = analyze_product_with_gemini(
-                        product_name, spec, title_text, raw_price, raw_shipping_text=delivery_text
-                    )
-                    
+                    calculated_price, is_matched, ai_shipping = analyze_product_with_gemini(product_name, spec, title_text, raw_price, delivery_text)
                     if is_matched:
                         href = first_prod.select_one("a").get('href', '') if first_prod.select_one("a") else ""
                         product_link = f"https://www.coupang.com{href}" if href.startswith('/') else search_url
                         return "쿠팡", calculated_price, ai_shipping, product_link
-
-    except Exception as e:
-        pass
-
+    except: pass
     return "쿠팡", 0, "", "-"
 
 # ----------------------------------------------------
@@ -362,7 +339,7 @@ def run_price_update():
         total_rows = len(all_rows)
 
         print("==================================================", flush=True)
-        print(f"🚀 [총 중량 비례 환산 적용] 총 {total_rows}개 행 조사를 시작합니다.", flush=True)
+        print(f"🚀 [T열 URL 우선 지원 / 4채널 수집 가동] 총 {total_rows}개 행 조사를 시작합니다.", flush=True)
         print("==================================================\n", flush=True)
 
         batch_data = []
@@ -377,30 +354,37 @@ def run_price_update():
             product_name = row_values[2] if len(row_values) >= 3 else ""
             spec = row_values[3] if len(row_values) >= 4 else ""
             category = row_values[8] if len(row_values) >= 9 else ""
+            custom_url = row_values[19].strip() if len(row_values) >= 20 else ""  # T열 (인덱스 19)
 
-            print(f"▶ [{row_idx}/{total_rows}행] 품목: '{product_name}' | 규격: '{spec}' | 구분: '{category}'", flush=True)
+            print(f"▶ [{row_idx}/{total_rows}행] 품목: '{product_name}' | 규격: '{spec}' | T열URL: '{custom_url[:30]}...'", flush=True)
 
             if any(skip_word in category for skip_word in ['전용', '예산', '종료']) or not product_name.strip():
                 print(f"  ⏭️ 스킵됨", flush=True)
                 batch_data.append(orig_j_to_s)
                 continue
 
-            results = [
-                fetch_danawa_price(product_name, spec),
-                fetch_baemin_price(product_name, spec),
-                fetch_naver_price(product_name, spec),
-                fetch_coupang_price(product_name, spec)
-            ]
-
-            valid_results = [r for r in results if r[1] > 0]
-
-            if valid_results:
-                valid_results.sort(key=lambda x: x[1])
-                best_channel, best_price, best_shipping, best_link = valid_results[0]
-                print(f"  🏆 [최저가 확정] 채널: {best_channel} | 최종 환산가: {best_price:,}원 | 배송비: {best_shipping if best_shipping else '무료/없음'}", flush=True)
+            # 📌 1. T열에 direct URL이 있으면 우선적으로 해당 페이지에서 가져옴
+            if custom_url.startswith("http"):
+                print(f"  🔗 [T열 지정 링크 직진] {custom_url}", flush=True)
+                best_channel, best_price, best_shipping, best_link = fetch_direct_url_price(custom_url, product_name, spec)
             else:
-                best_channel, best_price, best_shipping, best_link = "검색결과없음", 0, "", "-"
-                print(f"  ⚠️ [검색 결과 없음] 4개 채널에서 모두 제품을 찾지 못했습니다.", flush=True)
+                # 📌 2. T열이 비어있으면 4개 채널 자동 검색
+                results = [
+                    fetch_danawa_price(product_name, spec),
+                    fetch_baemin_price(product_name, spec),
+                    fetch_naver_price(product_name, spec),
+                    fetch_coupang_price(product_name, spec)
+                ]
+
+                valid_results = [r for r in results if r[1] > 0]
+
+                if valid_results:
+                    valid_results.sort(key=lambda x: x[1])
+                    best_channel, best_price, best_shipping, best_link = valid_results[0]
+                    print(f"  🏆 [최저가 확정] 채널: {best_channel} | 최종 환산가: {best_price:,}원", flush=True)
+                else:
+                    best_channel, best_price, best_shipping, best_link = "검색결과없음", 0, "", "-"
+                    print(f"  ⚠️ [검색 결과 없음] 4개 채널에서 모두 제품을 찾지 못했습니다.", flush=True)
 
             link_formula = f'=HYPERLINK("{best_link}", "링크보기")' if (best_link and best_link != "-") else "-"
 
@@ -417,7 +401,7 @@ def run_price_update():
         cell_range = f"J3:S{total_rows}"
         safe_batch_update(worksheet, cell_range, batch_data)
 
-        print("🎉 모든 총 중량 비례 환산 및 시트 일괄 업데이트가 완료되었습니다!", flush=True)
+        print("🎉 T열 URL 우선 지원 및 시트 일괄 업데이트가 완벽히 완료되었습니다!", flush=True)
 
     except Exception as e:
         print(f"❌ 오류 발생: {str(e)}", flush=True)
