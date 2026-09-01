@@ -1,27 +1,29 @@
-name: Run Price Update
+name: Price Update Workflow
 
 on:
   workflow_dispatch:
+  schedule:
+    - cron: '0 0 * * *' # 매일 정해진 시간에 자동 실행 (필요 시 조정)
 
 jobs:
-  run-test:
+  update-price:
     runs-on: ubuntu-latest
+
     steps:
-      - name: 저장소 코드 가져오기
+      - name: Check out repository
         uses: actions/checkout@v4
 
-      - name: 파이썬 환경 설정
+      - name: Set up Python
         uses: actions/setup-python@v5
         with:
           python-version: '3.10'
 
-      - name: 필요 라이브러리 및 셀레니움/크롬 설치
+      - name: Install dependencies
         run: |
-          sudo apt-get update
-          sudo apt-get install -y google-chrome-stable
-          pip install gspread google-auth google-auth-oauthlib selenium webdriver-manager beautifulsoup4
+          python -m pip install --upgrade pip
+          pip install gspread google-auth google-auth-oauthlib beautifulsoup4 curl_cffi
 
-      - name: 가격 조사 및 시트 업데이트 스크립트 실행
+      - name: Run price update script
         env:
           GCP_TOKEN_JSON: ${{ secrets.GCP_TOKEN_JSON }}
         run: python update_price.py
