@@ -10,13 +10,13 @@ from curl_cffi import requests
 
 def fetch_danawa_price(search_query):
     """
-    다나와(Danawa) 검색을 통해 최저가 판매채널(J열), 판매가(K열), 배송비(L열)를 수집합니다.
+    다나와(Danawa) 검색을 통해 판매채널(J열), 판매가(K열), 배송비(L열), 상품링크(S열)를 수집합니다.
     """
     clean_query = search_query.replace("*", " ").strip()
     print(f"  [다나와 검색] 키워드: '{clean_query}'")
     
     encoded_query = requests.utils.quote(clean_query)
-    url = f"https://search.danawa.com/dsearch.php?k1={encoded_query}&module=goods&act=dispMain"
+    search_url = f"https://search.danawa.com/dsearch.php?k1={encoded_query}&module=goods&act=dispMain"
     
     headers = {
         "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36",
@@ -27,7 +27,7 @@ def fetch_danawa_price(search_query):
 
     try:
         # 크롬 브라우저 TLS 우회 접속
-        response = requests.get(url, headers=headers, impersonate="chrome120", timeout=10)
+        response = requests.get(search_url, headers=headers, impersonate="chrome120", timeout=10)
         print(f"  [응답 코드] {response.status_code}")
 
         if response.status_code == 200:
@@ -44,12 +44,12 @@ def fetch_danawa_price(search_query):
                 else:
                     sale_price = 0
 
-                # 2. 판매채널 (J열) - 최저가 몰 정보 또는 다나와 최저가 표시
+                # 2. 판매채널 (J열) - 다나와로 지정 (특정 몰이 잡히면 해당 몰 이름, 아니면 '다나와')
                 channel_el = first_product.select_one("div.memory_sect p.memory_mall") or first_product.select_one("p.mall_name")
                 if channel_el and channel_el.text.strip():
                     channel_name = channel_el.text.strip()
                 else:
-                    channel_name = "다나와 최저가"
+                    channel_name = "다나와"
 
                 # 3. 배송비 (L열)
                 delivery_el = first_product.select_one("span.ship_fee") or first_product.select_one("div.delivery_sect")
@@ -63,13 +63,22 @@ def fetch_danawa_price(search_query):
                 else:
                     shipping_fee = "기본배송"
 
+                # 4. 링크 추출 (S열) - 상품 개별 상세 링크 추출 (없을 경우 검색 결과 페이지 링크)
+                link_el = first_product.select_one("p.prod_name a") or first_product.select_one("a.thumb_link")
+                if link_el and link_el.get('href'):
+                    product_link = link_el.get('href')
+                    if product_link.startswith("//"):
+                        product_link = "https:" + product_link
+                else:
+                    product_link = search_url
+
                 if sale_price > 0:
-                    return channel_name, sale_price, shipping_fee
+                    return channel_name, sale_price, shipping_fee, product_link
 
     except Exception as e:
         print(f"  ❌ 다나와 수집 예외: {e}")
 
-    return None, None, None
+    return None, None, None, None
 
 def run_price_update():
     try:
@@ -119,25 +128,33 @@ def run_price_update():
 
             # 1차 시도: C열(품목명) + D열(규격)
             search_query = f"{product_name} {spec}".strip()
-            channel, price, shipping = fetch_danawa_price(search_query)
+            channel, price, shipping, link = fetch_danawa_price(search_query)
 
             # 2차 시도 (실패 시): C열(품목명) 단독 검색
             if not channel or price == 0:
                 print(f"  └─ ⚠️ 1차 실패 후 품목명 단독 재검색 시도: '{product_name}'")
-                channel, price, shipping = fetch_danawa_price(product_name.strip())
+                channel, price, shipping, link = fetch_danawa_price(product_name.strip())
 
             if not channel or price == 0:
-                channel, price, shipping = "검색결과없음", 0, "-"
+                channel, price, shipping, link = "검색결과없음", 0, "-", "-"
 
-            # J열(10: 판매채널), K열(11: 판매가), L열(12: 택배비) 업데이트
+            # 시트 업데이트
+            # J열(10): 판매채널, K열(11): 판매가, L열(12): 택배비
             worksheet.update_cell(row_num, 10, channel)
             worksheet.update_cell(row_num, 11, price)
             worksheet.update_cell(row_num, 12, shipping)
 
-            print(f"  ✔ [완료] J={channel} | K={price:,}원 | L={shipping}\n")
+            # S열(19): 클릭 가능한 최저가 상품 링크 수식 입력
+            if link and link != "-":
+                hyperlink_formula = f'=HYPERLINK("{link}", "링크보기")'
+                worksheet.update_cell(row_num, 19, hyperlink_formula)
+            else:
+                worksheet.update_cell(row_num, 19, "-")
+
+            print(f"  ✔ [완료] J={channel} | K={price:,}원 | L={shipping} | S=링크입력완료\n")
             time.sleep(2.0)
 
-        print("🎉 다나와 가격 수집 및 구글 시트 업데이트가 완료되었습니다!")
+        print("🎉 다나와 가격 수집 및 구글 시트(S열 링크 포함) 업데이트가 완료되었습니다!")
 
     except Exception as e:
         print(f"❌ 오류 발생: {str(e)}")
