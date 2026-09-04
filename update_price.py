@@ -4,15 +4,22 @@ import time
 import re
 import warnings
 import gspread
+import torch
 from google import genai
 from google.oauth2.credentials import Credentials
 from google.auth.transport.requests import Request
 from bs4 import BeautifulSoup
 from tenacity import retry, stop_after_attempt, wait_exponential, retry_if_exception_type
 from playwright.sync_api import sync_playwright
+from sentence_transformers import SentenceTransformer, util
 
 warnings.filterwarnings("ignore", category=UserWarning)
 
+# 🤖 BERT 기반 한국어 문맥 매칭 모델 초기화 (SBERT)
+print("📦 BERT 모델(ko-sbert-sts) 로딩 중...", flush=True)
+bert_model = SentenceTransformer('jhgan/ko-sbert-sts')
+
+# Gemini API 클라이언트 초기화
 gemini_api_key = os.environ.get('GEMINI_API_KEY')
 ai_client = genai.Client(api_key=gemini_api_key) if gemini_api_key else None
 
@@ -32,25 +39,21 @@ def safe_open_sheet(gc, sheet_url):
 def safe_batch_update(worksheet, cell_range, values_matrix):
     worksheet.update(cell_range, values_matrix, raw=False)
 
-@retry(
-    retry=retry_if_exception_type(Exception),
-    stop=stop_after_attempt(5),
-    wait=wait_exponential(multiplier=3, min=8, max=30)
-)
-def call_gemini_api(prompt):
-    return ai_client.models.generate_content(
-        model='gemini-2.5-flash',
-        contents=prompt,
-        config={
-            'response_mime_type': 'application/json',
-            'tools': []
-        }
-    )
+def calculate_bert_similarity(query, candidate_title):
+    """BERT 코사인 유사도로 두 상품명의 문맥 유사도 점수(0~1)를 반환합니다."""
+    try:
+        emb1 = bert_model.encode(query, convert_to_tensor=True)
+        emb2 = bert_model.encode(candidate_title, convert_to_tensor=True)
+        score = util.cos_sim(emb1, emb2).item()
+        return score
+    except Exception as e:
+        print(f"  ⚠️ BERT 유사도 계산 오류: {e}", flush=True)
+        return 0.5
 
-def clean_search_keyword(product_name, spec, custom_text=""):
-    """T열 텍스트가 있으면 최우선으로 사용하고, 없으면 C열+D열 정제 키워드 사용"""
-    if custom_text and not custom_text.startswith("http"):
-        return custom_text.strip()
+def clean_search_keyword(product_name, spec, custom_val=""):
+    """📌 T열 입력값이 있으면 최우선 검색어로 사용, 없으면 C열+D열 조합"""
+    if custom_val and not custom_val.startswith("http"):
+        return custom_val.strip()
 
     clean_p = re.sub(r'[^\w\s가-힣a-zA-Z0-9]', ' ', product_name).strip()
     unit_match = re.search(r'(\d+(?:\.\d+)?\s*(?:kg|g|l|ml))', spec, re.IGNORECASE)
@@ -58,12 +61,13 @@ def clean_search_keyword(product_name, spec, custom_text=""):
     return re.sub(r'\s+', ' ', f"{clean_p} {spec_unit}").strip()
 
 def analyze_product_with_gemini(sheet_product, sheet_spec, crawled_title, crawled_price, raw_shipping_text=""):
-    if not ai_client:
+    """Gemini AI를 통한 용량 비례 환산 및 배송비 파싱"""
+    if not ai_client or crawled_price == 0:
         return crawled_price, True, ""
 
     prompt = f"""
 너는 쇼핑몰 데이터 분석 및 용량 계산 전문가야.
-아래 [구글 시트 요청 정보]와 크롤링한 [쇼핑몰 검색 결과]를 엄격하게 비교해줘.
+아래 [구글 시트 요청 정보]와 크롤링한 [쇼핑몰 검색 결과]를 분석해줘.
 
 [구글 시트 요청 정보]
 - 품목명: {sheet_product}
@@ -75,13 +79,13 @@ def analyze_product_with_gemini(sheet_product, sheet_spec, crawled_title, crawle
 - 수집된 배송비 관련 텍스트: {raw_shipping_text}
 
 응답 규칙(오직 JSON만):
-1. "is_matched": 검색된 상품이 구글 시트 요청 품목과 동일 종류인지 엄격 검증 (true/false)
+1. "is_matched": 검색된 상품이 구글 시트 요청 품목과 동일 종류인지 검증 (true/false)
 2. "crawled_total_capacity_g": 검색된 상품명의 전체 총 용량/중량(g 또는 ml 숫자만, 예: 12kg -> 12000). 모르면 0
 3. "sheet_target_capacity_g": 구글 시트 규격의 전체 목표 총 용량/중량(g 또는 ml 숫자만, 예: 10kg -> 10000). 모르면 0
 4. "shipping_fee": 배송비 금액 (무료/로켓배송/정보없음은 "", 유료배송비면 '3,000원' 형태)
 5. "reason": 판단 및 환산 이유 요약
 
-응답 형식(JSON):
+JSON 응답 예시:
 {{
   "is_matched": true,
   "crawled_total_capacity_g": 12000,
@@ -92,11 +96,15 @@ def analyze_product_with_gemini(sheet_product, sheet_spec, crawled_title, crawle
 """
 
     try:
-        response = call_gemini_api(prompt)
-        time.sleep(1.0)
+        response = ai_client.models.generate_content(
+            model='gemini-2.5-flash',
+            contents=prompt,
+            config={'response_mime_type': 'application/json', 'tools': []}
+        )
+        time.sleep(0.8)
         
         result = json.loads(response.text)
-        is_matched = result.get("is_matched", False)
+        is_matched = result.get("is_matched", True)
         crawled_g = result.get("crawled_total_capacity_g", 0)
         target_g = result.get("sheet_target_capacity_g", 0)
         shipping_fee = result.get("shipping_fee", "")
@@ -106,17 +114,14 @@ def analyze_product_with_gemini(sheet_product, sheet_spec, crawled_title, crawle
         if is_matched and crawled_g > 0 and target_g > 0:
             final_calculated_price = int((crawled_price / crawled_g) * target_g)
             print(f"  🤖 [Gemini 환산] {crawled_g}g({crawled_price:,}원) ➔ {target_g}g 환산가: {final_calculated_price:,}원", flush=True)
-        else:
-            print(f"  🤖 [Gemini 검증] 일치={is_matched} | 사유={reason}", flush=True)
 
         return final_calculated_price, is_matched, shipping_fee
 
     except Exception as e:
-        print(f"  ❌ Gemini 분석 예외: {e}", flush=True)
-        return crawled_price, False, ""
+        print(f"  ⚠️ Gemini 분석 예외 (원래 가격 사용): {e}", flush=True)
+        return crawled_price, True, ""
 
 def fetch_with_browser(page, url, selector_item, parser_fn):
-    """Playwright 브라우저 기반 렌더링 수집 공통 함수"""
     try:
         page.goto(url, timeout=15000, wait_until="domcontentloaded")
         time.sleep(2)
@@ -124,11 +129,12 @@ def fetch_with_browser(page, url, selector_item, parser_fn):
         soup = BeautifulSoup(html, 'html.parser')
         items = soup.select(selector_item)
         return parser_fn(items, url)
-    except Exception as e:
-        return None
+    except Exception:
+        return []
 
 def parse_danawa(items, search_url):
-    for first_prod in items[:3]:
+    results = []
+    for first_prod in items[:5]:
         title_el = first_prod.select_one("p.prod_name a")
         title_text = title_el.text.strip() if title_el else ""
         price_el = first_prod.select_one("p.price_sect a strong") or first_prod.select_one("span.num")
@@ -136,17 +142,18 @@ def parse_danawa(items, search_url):
         ship_el = first_prod.select_one("span.ship_fee") or first_prod.select_one("td.ship") or first_prod.select_one("span.stxt")
         ship_text = ship_el.text.strip() if ship_el else ""
 
-        if raw_price > 0:
+        if raw_price > 0 and title_text:
             channel_el = first_prod.select_one("div.memory_sect p.memory_mall") or first_prod.select_one("p.mall_name")
             mall_text = channel_el.text.strip() if (channel_el and channel_el.text.strip()) else "다나와"
             link_el = first_prod.select_one("p.prod_name a") or first_prod.select_one("a.thumb_link")
             href = link_el.get('href') if link_el else ""
             product_link = f"https:{href}" if href.startswith("//") else (href or search_url)
-            return mall_text, title_text, raw_price, ship_text, product_link
-    return None
+            results.append((mall_text, title_text, raw_price, ship_text, product_link))
+    return results
 
 def parse_naver(items, search_url):
-    for first_prod in items[:3]:
+    results = []
+    for first_prod in items[:5]:
         title_el = first_prod.select_one("a[class*='product_link']") or first_prod.select_one("a[title]")
         title_text = title_el.text.strip() if title_el else ""
         price_el = first_prod.select_one("span[class*='price_num']") or first_prod.select_one("em[class*='num']")
@@ -154,14 +161,15 @@ def parse_naver(items, search_url):
         ship_el = first_prod.select_one("span[class*='price_delivery']") or first_prod.select_one("div[class*='delivery']")
         ship_text = ship_el.text.strip() if ship_el else ""
 
-        if raw_price > 0:
+        if raw_price > 0 and title_text:
             href = title_el.get('href', '') if title_el else ""
             product_link = href if href.startswith("http") else search_url
-            return "네이버쇼핑", title_text, raw_price, ship_text, product_link
-    return None
+            results.append(("네이버쇼핑", title_text, raw_price, ship_text, product_link))
+    return results
 
 def parse_coupang(items, search_url):
-    for first_prod in items[:3]:
+    results = []
+    for first_prod in items[:5]:
         if first_prod.select_one("span.ad-badge"): continue
         title_el = first_prod.select_one("div.name")
         title_text = title_el.text.strip() if title_el else ""
@@ -170,11 +178,11 @@ def parse_coupang(items, search_url):
         delivery_el = first_prod.select_one("span.delivery-badge") or first_prod.select_one("div.delivery")
         delivery_text = delivery_el.text.strip() if delivery_el else ""
 
-        if raw_price > 0:
+        if raw_price > 0 and title_text:
             href = first_prod.select_one("a").get('href', '') if first_prod.select_one("a") else ""
             product_link = f"https://www.coupang.com{href}" if href.startswith('/') else search_url
-            return "쿠팡", title_text, raw_price, delivery_text, product_link
-    return None
+            results.append(("쿠팡", title_text, raw_price, delivery_text, product_link))
+    return results
 
 def run_price_update():
     try:
@@ -201,7 +209,7 @@ def run_price_update():
         total_rows = len(all_rows)
 
         print("==================================================", flush=True)
-        print(f"🚀 [Playwright 차단 회피 엔진 가동] 총 {total_rows}개 행 수집을 시작합니다.", flush=True)
+        print(f"🚀 [BERT 유사도 검증 + Playwright 기반] 총 {total_rows}개 행 수집 시작", flush=True)
         print("==================================================\n", flush=True)
 
         batch_data = []
@@ -222,7 +230,7 @@ def run_price_update():
                 category = row_values[8] if len(row_values) >= 9 else ""
                 custom_val = row_values[19].strip() if len(row_values) >= 20 else ""
 
-                print(f"▶ [{row_idx}/{total_rows}행] 품목: '{product_name}' | 규격: '{spec}' | T열입력: '{custom_val}'", flush=True)
+                print(f"▶ [{row_idx}/{total_rows}행] 품목: '{product_name}' | 규격: '{spec}' | T열우선: '{custom_val}'", flush=True)
 
                 if any(skip_word in category for skip_word in ['전용', '예산', '종료']) or not product_name.strip():
                     print(f"  ⏭️ 스킵됨", flush=True)
@@ -240,12 +248,18 @@ def run_price_update():
 
                 valid_results = []
                 for url, selector, parser in targets:
-                    crawled = fetch_with_browser(page, url, selector, parser)
-                    if crawled:
-                        mall_name, title, price, ship, link = crawled
-                        calc_price, is_matched, ai_ship = analyze_product_with_gemini(product_name, spec, title, price, ship)
-                        if is_matched and calc_price > 0:
-                            valid_results.append((mall_name, calc_price, ai_ship if ai_ship else ship, link))
+                    candidates = fetch_with_browser(page, url, selector, parser)
+                    
+                    # 📌 BERT 의미 유사도 계산 후 0.55 이상인 상품만 선택
+                    for mall_name, title, price, ship, link in candidates:
+                        sim_score = calculate_bert_similarity(search_query, title)
+                        print(f"  🔍 [{mall_name}] '{title[:25]}...' ➔ BERT 유사도: {sim_score:.3f}", flush=True)
+
+                        if sim_score >= 0.55:
+                            calc_price, is_matched, ai_ship = analyze_product_with_gemini(product_name, spec, title, price, ship)
+                            if is_matched and calc_price > 0:
+                                valid_results.append((mall_name, calc_price, ai_ship if ai_ship else ship, link))
+                                break  # 해당 채널에서 1개 적합 상품 발견 시 다음 채널로
 
                 if valid_results:
                     valid_results.sort(key=lambda x: x[1])
@@ -253,7 +267,7 @@ def run_price_update():
                     print(f"  🏆 [최저가 확정] 채널: {best_channel} | 환산가: {best_price:,}원", flush=True)
                 else:
                     best_channel, best_price, best_shipping, best_link = "검색결과없음", 0, "", "-"
-                    print(f"  ⚠️ [검색 결과 없음] 상품을 찾지 못했습니다.", flush=True)
+                    print(f"  ⚠️ [검색 결과 없음] BERT 유사 기준을 만족하는 상품이 없습니다.", flush=True)
 
                 link_formula = f'=HYPERLINK("{best_link}", "링크보기")' if (best_link and best_link != "-") else "-"
 
@@ -271,7 +285,7 @@ def run_price_update():
         cell_range = f"J3:S{total_rows}"
         safe_batch_update(worksheet, cell_range, batch_data)
 
-        print("🎉 시트 일괄 업데이트가 완료되었습니다!", flush=True)
+        print("🎉 BERT 적용 최저가 조사가 성공적으로 완료되었습니다!", flush=True)
 
     except Exception as e:
         print(f"❌ 오류 발생: {str(e)}", flush=True)
