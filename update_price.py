@@ -7,7 +7,7 @@ import gspread
 import io
 import base64
 from google import genai
-from openai import OpenAI
+from anthropic import Anthropic
 from google.oauth2.credentials import Credentials
 from google.auth.transport.requests import Request
 from bs4 import BeautifulSoup
@@ -23,10 +23,10 @@ bert_model = SentenceTransformer('jhgan/ko-sbert-sts')
 
 # API 클라이언트 초기화
 gemini_api_key = os.environ.get('GEMINI_API_KEY')
-openai_api_key = os.environ.get('OPENAI_API_KEY')
+anthropic_api_key = os.environ.get('ANTHROPIC_API_KEY')
 
 gemini_client = genai.Client(api_key=gemini_api_key) if gemini_api_key else None
-openai_client = OpenAI(api_key=openai_api_key) if openai_api_key else None
+claude_client = Anthropic(api_key=anthropic_api_key) if anthropic_api_key else None
 
 @retry(
     retry=retry_if_exception_type(gspread.exceptions.APIError),
@@ -71,7 +71,7 @@ def parse_weight_to_grams(text):
     return 0
 
 def call_ai_text_fallback(prompt):
-    """📌 1차: Gemini 3.6-flash / 실패 시 2차: GPT-4o-mini 폴백"""
+    """📌 1차: Gemini 3.6-flash / 실패 시 2차: Claude 3.5 Haiku 폴백"""
     if gemini_client:
         try:
             res = gemini_client.models.generate_content(
@@ -79,30 +79,32 @@ def call_ai_text_fallback(prompt):
                 contents=prompt,
                 config={'response_mime_type': 'application/json', 'tools': []}
             )
+            time.sleep(1.5)
             return res.text
         except Exception as e:
-            print(f"  ⚠️ [Gemini 실패/과부하] {e} ➔ GPT-4o-mini 전환 시도", flush=True)
+            print(f"  ⚠️ [Gemini 에러/한도초과] {e} ➔ Claude 모델로 자동 전환합니다.", flush=True)
 
-    if openai_client:
+    if claude_client:
         try:
-            res = openai_client.chat.completions.create(
-                model="gpt-4o-mini",
+            res = claude_client.messages.create(
+                model="claude-3-5-haiku-latest",
+                max_tokens=500,
+                system="너는 쇼핑몰 데이터 분석 전문가야. 오직 검증된 순수 JSON 형태로만 답해.",
                 messages=[
-                    {"role": "system", "content": "너는 데이터 분석가야. 요청에 대해 오직 JSON 형식으로만 응답해."},
                     {"role": "user", "content": prompt}
-                ],
-                response_format={"type": "json_object"}
+                ]
             )
-            print("  🟢 [GPT-4o-mini 응답 성공]", flush=True)
-            return res.choices[0].message.content
+            time.sleep(1.0)
+            print("  🟣 [Claude 3.5 Haiku 응답 성공]", flush=True)
+            return res.content[0].text
         except Exception as e:
-            print(f"  ❌ [GPT API 실패]: {e}", flush=True)
+            print(f"  ❌ [Claude API도 실패]: {e}", flush=True)
 
     return None
 
 def extract_price_via_vision_ocr(image_bytes):
-    """📌 캡처 이미지 OCR: 1차 Gemini / 실패 시 2차 GPT-4o-mini Vision"""
-    prompt = "이 이미지의 최저가 판매 가격(숫자만)과 배송비를 JSON으로 응답해: {\"price\": 51020, \"shipping_fee\": \"무료\"}"
+    """📌 캡처 이미지 OCR: 1차 Gemini / 실패 시 2차 Claude 3.5 Sonnet Vision"""
+    prompt = "이 쇼핑몰 캡처 이미지에서 최저가 판매 가격(숫자만)과 배송비를 JSON으로 응답해: {\"price\": 51020, \"shipping_fee\": \"무료\"}"
     
     if gemini_client:
         try:
@@ -115,29 +117,39 @@ def extract_price_via_vision_ocr(image_bytes):
             result = json.loads(res.text)
             return result.get("price", 0), result.get("shipping_fee", "")
         except Exception as e:
-            print(f"  ⚠️ [Gemini Vision 실패] {e} ➔ GPT Vision 전환 시도", flush=True)
+            print(f"  ⚠️ [Gemini Vision 실패] {e} ➔ Claude Vision 전환 시도", flush=True)
 
-    if openai_client:
+    if claude_client:
         try:
             base64_image = base64.b64encode(image_bytes).decode('utf-8')
-            res = openai_client.chat.completions.create(
-                model="gpt-4o-mini",
+            res = claude_client.messages.create(
+                model="claude-3-5-sonnet-latest",
+                max_tokens=500,
                 messages=[
                     {
                         "role": "user",
                         "content": [
-                            {"type": "text", "text": prompt},
-                            {"type": "image_url", "image_url": {"url": f"data:image/png;base64,{base64_image}"}}
+                            {
+                                "type": "image",
+                                "source": {
+                                    "type": "base64",
+                                    "media_type": "image/png",
+                                    "data": base64_image
+                                }
+                            },
+                            {
+                                "type": "text",
+                                "text": prompt
+                            }
                         ]
                     }
-                ],
-                response_format={"type": "json_object"}
+                ]
             )
-            result = json.loads(res.choices[0].message.content)
-            print("  🟢 [GPT Vision OCR 성공]", flush=True)
+            result = json.loads(res.content[0].text)
+            print("  🟣 [Claude Vision OCR 성공]", flush=True)
             return result.get("price", 0), result.get("shipping_fee", "")
         except Exception as e:
-            print(f"  ❌ [GPT Vision OCR 실패]: {e}", flush=True)
+            print(f"  ❌ [Claude Vision OCR 실패]: {e}", flush=True)
 
     return 0, ""
 
@@ -169,7 +181,7 @@ def analyze_product_smart(sheet_product, sheet_spec, crawled_title, crawled_pric
 [시트] 품목:{sheet_product} | 규격:{sheet_spec}
 [수집] 상품명:{crawled_title} | 가격:{crawled_price}원 | 배송비:{raw_shipping_text}
 
-JSON 응답 규칙:
+JSON 응답 규칙 (오직 pure JSON 구조로만 답할 것):
 1. "is_matched": 동일 품목 여부 (true/false)
 2. "crawled_g": 수집된 상품 총 용량(g/ml 숫자만)
 3. "target_g": 시트 목표 총 용량(g/ml 숫자만)
@@ -184,7 +196,10 @@ JSON 응답 규칙:
         return crawled_price, True, "", "기본 단가 적용"
 
     try:
-        result = json.loads(response_text)
+        # JSON 문자열 정제 로직
+        clean_json_str = re.sub(r'```json\s*|\s*```', '', response_text).strip()
+        result = json.loads(clean_json_str)
+        
         is_matched = result.get("is_matched", True)
         cg = result.get("crawled_g", 0)
         tg = result.get("target_g", 0)
@@ -199,7 +214,7 @@ JSON 응답 규칙:
         return final_price, is_matched, shipping_fee, reason
 
     except Exception as e:
-        print(f"  ⚠️ 파싱 예외: {e}", flush=True)
+        print(f"  ⚠️ JSON 파싱 예외: {e}", flush=True)
         return crawled_price, True, "", "기본 단가 적용"
 
 def fetch_with_browser_and_ocr(page, url, selector_item, parser_fn):
@@ -300,7 +315,7 @@ def run_price_update():
         total_rows = len(all_rows)
 
         print("==================================================", flush=True)
-        print(f"🚀 [유료 엔진/폴백 우회 가동] 총 {total_rows}개 행 수집 시작", flush=True)
+        print(f"🚀 [Claude 3.5 폴백 통합 가동] 총 {total_rows}개 행 수집 시작", flush=True)
         print("==================================================\n", flush=True)
 
         batch_data = []
@@ -377,7 +392,7 @@ def run_price_update():
         cell_range = f"J3:T{total_rows}"
         safe_batch_update(worksheet, cell_range, batch_data)
 
-        print("🎉 작업이 완전히 성공적으로 마무리되었습니다!", flush=True)
+        print("🎉 Claude 폴백 통합 수집 프로세스가 성공적으로 완료되었습니다!", flush=True)
 
     except Exception as e:
         print(f"❌ 오류 발생: {str(e)}", flush=True)
