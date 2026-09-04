@@ -5,7 +5,9 @@ import re
 import warnings
 import gspread
 import io
+import base64
 from google import genai
+from openai import OpenAI
 from google.oauth2.credentials import Credentials
 from google.auth.transport.requests import Request
 from bs4 import BeautifulSoup
@@ -19,8 +21,12 @@ warnings.filterwarnings("ignore", category=UserWarning)
 print("📦 BERT 모델(ko-sbert-sts) 로딩 중...", flush=True)
 bert_model = SentenceTransformer('jhgan/ko-sbert-sts')
 
+# API 클라이언트 초기화
 gemini_api_key = os.environ.get('GEMINI_API_KEY')
-ai_client = genai.Client(api_key=gemini_api_key) if gemini_api_key else None
+openai_api_key = os.environ.get('OPENAI_API_KEY')
+
+gemini_client = genai.Client(api_key=gemini_api_key) if gemini_api_key else None
+openai_client = OpenAI(api_key=openai_api_key) if openai_api_key else None
 
 @retry(
     retry=retry_if_exception_type(gspread.exceptions.APIError),
@@ -47,18 +53,15 @@ def calculate_bert_similarity(query, candidate_title):
         return 0.5
 
 def parse_weight_to_grams(text):
-    """파이썬 정규식을 이용해 텍스트에서 총 중량/용량(g, ml)을 자동 계산합니다."""
     if not text: return 0
     text = text.lower().replace(" ", "")
     
-    # 1. 5kg*2ea, 5kgx2, 500g*10개 형태 파싱
     multi_match = re.search(r'(\d+(?:\.\d+)?)(kg|g|l|ml)[\*x](\d+)', text)
     if multi_match:
         val, unit, qty = float(multi_match.group(1)), multi_match.group(2), int(multi_match.group(3))
         multiplier = 1000 if unit in ['kg', 'l'] else 1
         return int(val * multiplier * qty)
         
-    # 2. 단일 용량 (10kg, 500g 등)
     single_match = re.search(r'(\d+(?:\.\d+)?)(kg|g|l|ml)', text)
     if single_match:
         val, unit = float(single_match.group(1)), single_match.group(2)
@@ -67,32 +70,76 @@ def parse_weight_to_grams(text):
         
     return 0
 
-# 📌 429 한도 초과 시 45~60초 자동 휴식 후 재시도하는 전용 데코레이터
-@retry(
-    retry=retry_if_exception_type(Exception),
-    stop=stop_after_attempt(5),
-    wait=wait_exponential(multiplier=3, min=45, max=65)
-)
-def call_gemini_with_retry(contents_prompt):
-    response = ai_client.models.generate_content(
-        model='gemini-3.6-flash',
-        contents=contents_prompt,
-        config={'response_mime_type': 'application/json', 'tools': []}
-    )
-    time.sleep(2.5)  # API 호출 성공 후 2.5초 안전 지연 (RPM 제한 준수)
-    return response
+def call_ai_text_fallback(prompt):
+    """📌 1차: Gemini 3.6-flash / 실패 시 2차: GPT-4o-mini 폴백"""
+    if gemini_client:
+        try:
+            res = gemini_client.models.generate_content(
+                model='gemini-3.6-flash',
+                contents=prompt,
+                config={'response_mime_type': 'application/json', 'tools': []}
+            )
+            return res.text
+        except Exception as e:
+            print(f"  ⚠️ [Gemini 실패/과부하] {e} ➔ GPT-4o-mini 전환 시도", flush=True)
+
+    if openai_client:
+        try:
+            res = openai_client.chat.completions.create(
+                model="gpt-4o-mini",
+                messages=[
+                    {"role": "system", "content": "너는 데이터 분석가야. 요청에 대해 오직 JSON 형식으로만 응답해."},
+                    {"role": "user", "content": prompt}
+                ],
+                response_format={"type": "json_object"}
+            )
+            print("  🟢 [GPT-4o-mini 응답 성공]", flush=True)
+            return res.choices[0].message.content
+        except Exception as e:
+            print(f"  ❌ [GPT API 실패]: {e}", flush=True)
+
+    return None
 
 def extract_price_via_vision_ocr(image_bytes):
-    if not ai_client: return 0, ""
-    try:
-        image = Image.open(io.BytesIO(image_bytes))
-        prompt = "이미지의 상품 가격(숫자만)과 배송비를 JSON으로 응답해: {\"price\": 51020, \"shipping_fee\": \"무료\"}"
-        response = call_gemini_with_retry([image, prompt])
-        result = json.loads(response.text)
-        return result.get("price", 0), result.get("shipping_fee", "")
-    except Exception as e:
-        print(f"  ⚠️ Vision OCR 스킵: {e}", flush=True)
-        return 0, ""
+    """📌 캡처 이미지 OCR: 1차 Gemini / 실패 시 2차 GPT-4o-mini Vision"""
+    prompt = "이 이미지의 최저가 판매 가격(숫자만)과 배송비를 JSON으로 응답해: {\"price\": 51020, \"shipping_fee\": \"무료\"}"
+    
+    if gemini_client:
+        try:
+            image = Image.open(io.BytesIO(image_bytes))
+            res = gemini_client.models.generate_content(
+                model='gemini-3.6-flash',
+                contents=[image, prompt],
+                config={'response_mime_type': 'application/json', 'tools': []}
+            )
+            result = json.loads(res.text)
+            return result.get("price", 0), result.get("shipping_fee", "")
+        except Exception as e:
+            print(f"  ⚠️ [Gemini Vision 실패] {e} ➔ GPT Vision 전환 시도", flush=True)
+
+    if openai_client:
+        try:
+            base64_image = base64.b64encode(image_bytes).decode('utf-8')
+            res = openai_client.chat.completions.create(
+                model="gpt-4o-mini",
+                messages=[
+                    {
+                        "role": "user",
+                        "content": [
+                            {"type": "text", "text": prompt},
+                            {"type": "image_url", "image_url": {"url": f"data:image/png;base64,{base64_image}"}}
+                        ]
+                    }
+                ],
+                response_format={"type": "json_object"}
+            )
+            result = json.loads(res.choices[0].message.content)
+            print("  🟢 [GPT Vision OCR 성공]", flush=True)
+            return result.get("price", 0), result.get("shipping_fee", "")
+        except Exception as e:
+            print(f"  ❌ [GPT Vision OCR 실패]: {e}", flush=True)
+
+    return 0, ""
 
 def clean_search_keyword(product_name, spec):
     clean_p = re.sub(r'[^\w\s가-힣a-zA-Z0-9]', ' ', product_name).strip()
@@ -101,26 +148,20 @@ def clean_search_keyword(product_name, spec):
     return re.sub(r'\s+', ' ', f"{clean_p} {spec_unit}").strip()
 
 def analyze_product_smart(sheet_product, sheet_spec, crawled_title, crawled_price, raw_shipping_text="", bert_score=0.0):
-    """
-    📌 파이썬 규칙 기반 1차 검증으로 Gemini API 호출을 85% 이상 절감합니다.
-    """
     sheet_g = parse_weight_to_grams(f"{sheet_product} {sheet_spec}")
     crawled_g = parse_weight_to_grams(crawled_title)
 
-    # 1. [API 0회] SBERT 고득점(0.80+) & 중량이 동일한 경우 Gemini 호출 없이 즉시 확정
+    # SBERT 고득점자 API 스킵
     if bert_score >= 0.80 and (sheet_g == crawled_g or crawled_g == 0 or sheet_g == 0):
-        print(f"  ⚡ [SBERT 패스] 고득점({bert_score:.2f}) & 중량 일치 ➔ Gemini API 스킵", flush=True)
         ship_str = "무료" if any(w in raw_shipping_text for w in ["무료", "로켓"]) else raw_shipping_text[:10]
         return crawled_price, True, ship_str, f"SBERT 유사도({bert_score:.2f}) 정밀 매칭"
 
-    # 2. [API 0회] 중량이 완벽히 똑같고 간단한 파이썬 계산이 가능한 경우
+    # 동일 용량 API 스킵
     if sheet_g > 0 and crawled_g > 0 and sheet_g == crawled_g:
-        print(f"  ⚡ [중량 동일 패스] {sheet_g}g 규격 일치 ➔ Gemini API 스킵", flush=True)
         ship_str = "무료" if any(w in raw_shipping_text for w in ["무료", "로켓"]) else raw_shipping_text[:10]
         return crawled_price, True, ship_str, f"용량({sheet_g}g) 동일 단가 적용"
 
-    # 3. [Gemini 호출] 중량이 서로 다르거나 비례 환산이 필수적인 건만 Gemini 호출
-    if not ai_client or crawled_price == 0:
+    if crawled_price == 0:
         return crawled_price, True, "", "기본 단가 책정"
 
     prompt = f"""
@@ -138,10 +179,12 @@ JSON 응답 규칙:
 응답 예시: {{"is_matched":true, "crawled_g":12000, "target_g":10000, "shipping_fee":"", "calculation_reason":"12kg(51,020원)을 10kg 목표 중량으로 환산하여 42,516원 책정"}}
 """
 
+    response_text = call_ai_text_fallback(prompt)
+    if not response_text:
+        return crawled_price, True, "", "기본 단가 적용"
+
     try:
-        response = call_gemini_with_retry(prompt)
-        result = json.loads(response.text)
-        
+        result = json.loads(response_text)
         is_matched = result.get("is_matched", True)
         cg = result.get("crawled_g", 0)
         tg = result.get("target_g", 0)
@@ -151,12 +194,12 @@ JSON 응답 규칙:
         final_price = crawled_price
         if is_matched and cg > 0 and tg > 0:
             final_price = int((crawled_price / cg) * tg)
-            print(f"  🤖 [Gemini 비례 환산] {cg}g({crawled_price:,}원) ➔ {tg}g 환산가: {final_price:,}원", flush=True)
+            print(f"  🤖 [AI 비례 환산] {cg}g({crawled_price:,}원) ➔ {tg}g 환산가: {final_price:,}원", flush=True)
 
         return final_price, is_matched, shipping_fee, reason
 
     except Exception as e:
-        print(f"  ⚠️ Gemini 분석 예외 (원래 가격 사용): {e}", flush=True)
+        print(f"  ⚠️ 파싱 예외: {e}", flush=True)
         return crawled_price, True, "", "기본 단가 적용"
 
 def fetch_with_browser_and_ocr(page, url, selector_item, parser_fn):
@@ -169,7 +212,6 @@ def fetch_with_browser_and_ocr(page, url, selector_item, parser_fn):
         
         results = parser_fn(items, url)
         
-        # HTML 파싱 실패 시 극소수만 Vision OCR 호출
         if not results:
             screenshot_bytes = page.screenshot(full_page=False)
             ocr_price, ocr_ship = extract_price_via_vision_ocr(screenshot_bytes)
@@ -258,7 +300,7 @@ def run_price_update():
         total_rows = len(all_rows)
 
         print("==================================================", flush=True)
-        print(f"🚀 [API 85% 절감 및 429 완전 대응 최적화 가동] 총 {total_rows}개 행 수집", flush=True)
+        print(f"🚀 [유료 엔진/폴백 우회 가동] 총 {total_rows}개 행 수집 시작", flush=True)
         print("==================================================\n", flush=True)
 
         batch_data = []
@@ -301,7 +343,6 @@ def run_price_update():
                     for mall_name, title, price, ship, link in candidates:
                         sim_score = calculate_bert_similarity(search_query, title)
                         if sim_score >= 0.55:
-                            # 📌 스마트 검증 함수 호출 (API 절감 로직 작동)
                             calc_price, is_matched, ai_ship, reason = analyze_product_smart(product_name, spec, title, price, ship, bert_score=sim_score)
                             if is_matched and calc_price > 0:
                                 valid_results.append((mall_name, calc_price, ai_ship if ai_ship else ship, link, reason))
@@ -336,7 +377,7 @@ def run_price_update():
         cell_range = f"J3:T{total_rows}"
         safe_batch_update(worksheet, cell_range, batch_data)
 
-        print("🎉 무료 요금제 완벽 최적화 작업이 성공적으로 마무리되었습니다!", flush=True)
+        print("🎉 작업이 완전히 성공적으로 마무리되었습니다!", flush=True)
 
     except Exception as e:
         print(f"❌ 오류 발생: {str(e)}", flush=True)
