@@ -22,7 +22,7 @@ driver.find_element(By.ID, 'userPw').send_keys('1234')
 
 # 3. 로그인 버튼 클릭
 # [주의] '로그인버튼_클래스' 부분도 실제 버튼의 코드로 바꿔주세요.
-driver.find_element(By.CLASS_NAME, 'btnLogin').click()
+driver.find_element(By.CLASS_NAME, 'btn-signin').click()
 
 time.sleep(5) # 로그인 완료 대기
 
