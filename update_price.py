@@ -6,7 +6,6 @@ import warnings
 import gspread
 import io
 from google import genai
-from google.genai import types
 from google.oauth2.credentials import Credentials
 from google.auth.transport.requests import Request
 from bs4 import BeautifulSoup
@@ -62,10 +61,11 @@ def extract_price_via_vision_ocr(image_bytes):
   "shipping_fee": "무료배송" 또는 "3,000원"
 }
 """
+        # 📌 최신 모델 gemini-3.6-flash 로 업데이트
         response = ai_client.models.generate_content(
-            model='gemini-2.5-flash',
+            model='gemini-3.6-flash',
             contents=[image, prompt],
-            config={'response_mime_type': 'application/json'}
+            config={'response_mime_type': 'application/json', 'tools': []}
         )
         result = json.loads(response.text)
         return result.get("price", 0), result.get("shipping_fee", "")
@@ -114,8 +114,9 @@ JSON 응답 예시:
 """
 
     try:
+        # 📌 최신 모델 gemini-3.6-flash 로 업데이트
         response = ai_client.models.generate_content(
-            model='gemini-2.5-flash',
+            model='gemini-3.6-flash',
             contents=prompt,
             config={'response_mime_type': 'application/json', 'tools': []}
         )
@@ -149,7 +150,6 @@ def fetch_with_browser_and_ocr(page, url, selector_item, parser_fn):
         
         results = parser_fn(items, url)
         
-        # 📌 만약 HTML 파싱에서 가격을 찾지 못했다면 화면 캡처 + Vision OCR 시도
         if not results:
             screenshot_bytes = page.screenshot(full_page=False)
             ocr_price, ocr_ship = extract_price_via_vision_ocr(screenshot_bytes)
@@ -238,7 +238,7 @@ def run_price_update():
         total_rows = len(all_rows)
 
         print("==================================================", flush=True)
-        print(f"🚀 [T열 산출근거 자동입력 + OCR 보조 엔진 가동] 총 {total_rows}개 행 수집", flush=True)
+        print(f"🚀 [Gemini 3.6-flash 업데이트 완료] 총 {total_rows}개 행 수집", flush=True)
         print("==================================================\n", flush=True)
 
         batch_data = []
@@ -302,7 +302,6 @@ def run_price_update():
                 row_update[2] = best_shipping
                 row_update[9] = link_formula
                 
-                # 📌 시트 T열(인덱스 10번째 영역, S열 다음)에 산출근거 적어주기
                 if len(row_update) <= 10:
                     row_update.append(best_reason)
                 else:
@@ -316,7 +315,7 @@ def run_price_update():
         cell_range = f"J3:T{total_rows}"
         safe_batch_update(worksheet, cell_range, batch_data)
 
-        print("🎉 T열 산출근거 자동 기록 및 OCR 보조 수집이 성공적으로 완료되었습니다!", flush=True)
+        print("🎉 gemini-3.6-flash 변경 완료 및 수집이 성공적으로 마무리되었습니다!", flush=True)
 
     except Exception as e:
         print(f"❌ 오류 발생: {str(e)}", flush=True)
