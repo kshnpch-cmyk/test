@@ -16,9 +16,9 @@ time.sleep(2)
 
 # 2. 회사코드, 아이디, 비밀번호 입력
 # [주의] 아래 '회사코드_ID', '아이디_ID', '비밀번호_ID' 부분은 실제 웹사이트의 F12(개발자 도구)를 눌러서 확인한 진짜 이름으로 바꿔야 합니다.
-driver.find_element(By.ID, '9000').send_keys('9000')
-driver.find_element(By.ID, 'admin').send_keys('admin')
-driver.find_element(By.ID, '1234').send_keys('1234')
+driver.find_element(By.ID, '회사코드_ID').send_keys('9000')
+driver.find_element(By.ID, '아이디_ID').send_keys('admin')
+driver.find_element(By.ID, '비밀번호_ID').send_keys('1234')
 
 # 3. 로그인 버튼 클릭
 # [주의] '로그인버튼_클래스' 부분도 실제 버튼의 코드로 바꿔주세요.
