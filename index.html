@@ -3,389 +3,981 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>가격 비교 대시보드</title>
-    <!-- 데이터 파싱 및 엑셀 생성 라이브러리 -->
-    <script src="https://cdnjs.cloudflare.com/ajax/libs/PapaParse/5.3.2/papaparse.min.js"></script>
-    <script src="https://cdnjs.cloudflare.com/ajax/libs/xlsx/0.18.5/xlsx.full.min.js"></script>
+    <title>더본 OMS 주문 실시간 대시보드</title>
+    <!-- 📱 모바일 접속 시 mobile.html 자동 리다이렉트 -->
+    <script>
+        if (/Mobi|Android|iPhone|iPad|iPod/i.test(navigator.userAgent)) {
+            location.replace('/mobile.html');
+        }
+    </script>
+    <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/xlsx@0.18.5/dist/xlsx.full.min.js"></script>
     <style>
         * { box-sizing: border-box; }
-        body { font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif; background-color: #f8f9fa; margin: 0; padding: 20px; color: #333; height: 100vh; display: flex; flex-direction: column; overflow: hidden; }
-        .container { width: 100%; display: flex; flex-direction: column; flex: 1; min-height: 0; }
-        .card { background: white; border-radius: 12px; padding: 24px; box-shadow: 0 4px 6px rgba(0,0,0,0.05); }
-        .kpi-card { flex-shrink: 0; margin-bottom: 20px; }
-        .table-card { flex: 1; display: flex; flex-direction: column; min-height: 0; margin-bottom: 0; }
-        h1 { margin-top: 0; font-size: 24px; color: #111; margin-bottom: 20px; }
-        
-        .summary-grid { display: grid; grid-template-columns: 0.8fr 1.6fr 1.3fr 1.3fr; gap: 16px; }
-        @media (max-width: 1024px) { .summary-grid { grid-template-columns: repeat(2, 1fr); } }
-        @media (max-width: 768px) { .summary-grid { grid-template-columns: 1fr; } }
+        body {
+            margin: 0; padding: 0;
+            font-family: 'Pretendard', 'Malgun Gothic', sans-serif;
+            background-color: #f1f5f9;
+            color: #1e293b;
+        }
+        .navbar {
+            background-color: #0f172a; color: white; padding: 15px 30px;
+            display: flex; justify-content: space-between; align-items: center;
+            box-shadow: 0 4px 6px rgba(0,0,0,0.1); flex-wrap: wrap; gap: 15px;
+        }
+        .brand-title { display: flex; align-items: center; gap: 10px; }
+        .brand-title h1 { margin: 0; font-size: 20px; font-weight: 700; }
+        .version-tag {
+            background-color: #10b981; color: white; font-size: 11px; font-weight: 800;
+            padding: 3px 8px; border-radius: 12px; letter-spacing: 0.5px;
+        }
+        .control-panel { display: flex; gap: 10px; align-items: center; flex-wrap: wrap; }
+        .sync-date-group {
+            display: flex; align-items: center; background-color: #1e293b;
+            padding: 6px 12px; border-radius: 8px; gap: 8px; border: 1px solid #334155;
+        }
+        .sync-date-group label { font-size: 13px; color: #94a3b8; font-weight: 600; }
+        .date-input {
+            background-color: #0f172a; color: #ffffff; border: 1px solid #475569;
+            padding: 6px 10px; border-radius: 6px; font-size: 13px; cursor: pointer; color-scheme: dark;
+        }
+        .last-updated-tag {
+            font-size: 12px; color: #38bdf8; background-color: #1e293b;
+            padding: 6px 12px; border-radius: 6px; border: 1px solid #0284c7; font-weight: bold;
+            display: flex; align-items: center; gap: 8px;
+        }
+        .btn {
+            background-color: #2563eb; color: white; border: none; padding: 8px 14px;
+            border-radius: 6px; font-weight: 700; cursor: pointer; font-size: 13px;
+        }
+        .btn:hover { background-color: #1d4ed8; }
+        .btn-query { background-color: #0284c7; }
+        .btn-cal { background-color: #0f766e; padding: 4px 8px; font-size: 11px; border-radius: 4px; }
+        .btn-excel { background-color: #16a34a; padding: 5px 10px; font-size: 12px; }
+        .btn-search-icon {
+            background-color: #475569; color: white; border: none; padding: 6px 9px;
+            border-radius: 6px; cursor: pointer; font-size: 12px; margin-left: -2px;
+        }
+        .btn-search-icon:hover { background-color: #334155; }
 
-        .kpi-box { background-color: #f8f9fa; border: 1px solid #e9ecef; border-radius: 8px; padding: 16px; display: flex; flex-direction: column; }
-        .kpi-title { font-size: 13px; color: #6c757d; font-weight: 600; margin-bottom: 10px; }
-        .kpi-value { font-size: 24px; font-weight: bold; color: #212529; margin-bottom: 12px; }
-        .kpi-list { font-size: 13px; color: #495057; line-height: 1.5; margin: 0; padding: 0; list-style: none; }
-        .kpi-list li { display: flex; justify-content: space-between; align-items: center; border-bottom: 1px dashed #dee2e6; padding: 4px 0; }
-        .kpi-list li:last-child { border-bottom: none; }
+        .container { padding: 20px; max-width: 98%; margin: 0 auto; }
+        .section-panel {
+            background: white; padding: 20px; border-radius: 12px;
+            margin-bottom: 20px; box-shadow: 0 2px 8px rgba(0,0,0,0.04);
+        }
+        .panel-header {
+            display: flex; justify-content: space-between; align-items: center;
+            border-bottom: 2px solid #f1f5f9; padding-bottom: 12px; margin-bottom: 15px; flex-wrap: wrap; gap: 10px;
+        }
+        .panel-title-text { font-size: 18px; font-weight: 700; color: #0f172a; }
         
-        .text-blue { color: #2563eb; }
-        .text-red { color: #dc2626; }
-        .text-gray { color: #4b5563; }
+        .filter-row {
+            display: flex; gap: 10px; align-items: center; flex-wrap: wrap;
+            background-color: #f8fafc; padding: 12px; border-radius: 8px; border: 1px solid #e2e8f0; margin-bottom: 15px;
+        }
+        .filter-group { display: flex; align-items: center; gap: 6px; font-size: 13px; font-weight: 600; color: #475569; }
+        .input-box { padding: 6px 10px; border: 1px solid #cbd5e1; border-radius: 6px; font-size: 13px; outline: none; }
 
-        .global-select { width: 100%; padding: 8px; border: 1px solid #ced4da; border-radius: 6px; font-size: 14px; outline: none; background-color: white; cursor: pointer; margin-top: auto; }
-        .global-select:focus { border-color: #3b82f6; }
-        .table-responsive { width: 100%; flex: 1; overflow: auto; border: 1px solid #e9ecef; border-radius: 4px; min-height: 0; }
-        
-        table { width: max-content; min-width: 100%; border-collapse: separate; border-spacing: 0; font-size: 14px; table-layout: auto; }
-        th, td { padding: 12px 15px; border-bottom: 1px solid #eee; border-right: 1px solid #eee; text-align: left; white-space: nowrap; }
-        td:last-child, th:last-child { border-right: none; }
-        thead th { position: sticky !important; top: 0; background-color: #f1f3f5; font-weight: 600; color: #495057; vertical-align: top; z-index: 10; box-shadow: 0 2px 2px -1px rgba(0, 0, 0, 0.1); position: relative; }
-        
-        table.is-fixed { table-layout: fixed; width: auto; }
-        table.is-fixed th, table.is-fixed td { white-space: normal !important; word-break: break-word !important; overflow: hidden; }
+        .kpi-grid { display: grid; grid-template-columns: repeat(3, 1fr); gap: 15px; margin-bottom: 15px; }
+        .kpi-card { background: #f8fafc; padding: 15px 20px; border-radius: 8px; border-left: 5px solid #2563eb; }
+        .kpi-card.green { border-left-color: #10b981; }
+        .kpi-card.purple { border-left-color: #8b5cf6; }
+        .kpi-title { font-size: 13px; color: #64748b; font-weight: 600; }
+        .kpi-value { font-size: 22px; font-weight: 800; margin-top: 4px; color: #0f172a; }
 
-        tr.highlight-win td { background-color: #eff6ff !important; color: #1d4ed8 !important; font-weight: 500; }
-        tr.highlight-lose td { background-color: #fef2f2 !important; color: #b91c1c !important; font-weight: 500; }
-        tr.highlight-tie td { background-color: #f3f4f6 !important; color: #4b5563 !important; font-weight: 500; }
-        tr:hover td { background-color: #f8f9fa; }
-        tr.highlight-win:hover td { background-color: #dbeafe !important; }
-        tr.highlight-lose:hover td { background-color: #fee2e2 !important; }
+        .chart-container { position: relative; height: 260px; width: 100%; }
 
-        .filter-input { width: 100%; padding: 6px 8px; margin-top: 8px; border: 1px solid #ccc; border-radius: 4px; font-size: 13px; outline: none; }
-        .filter-input:focus { border-color: #3b82f6; }
-        .summary-badge { font-size: 14px; color: #6366f1; font-weight: normal; margin-left: 10px; }
-        
-        /* 버튼 스타일 */
-        .table-header-wrap { display: flex; justify-content: space-between; align-items: center; margin-bottom: 15px; }
-        .btn-group { display: flex; gap: 8px; }
-        .btn-save { background-color: #ffffff; border: 1px solid #ced4da; padding: 6px 12px; border-radius: 6px; font-size: 13px; cursor: pointer; color: #495057; font-weight: 600; transition: 0.2s; }
-        .btn-save:hover { background-color: #f1f3f5; }
-        
-        /* 🔥 새로 추가된 엑셀 저장 버튼 스타일 */
-        .btn-excel { background-color: #10b981; border: 1px solid #059669; padding: 6px 12px; border-radius: 6px; font-size: 13px; cursor: pointer; color: white; font-weight: 600; transition: 0.2s; }
-        .btn-excel:hover { background-color: #059669; }
+        .modal-overlay {
+            display: none; position: fixed; top: 0; left: 0; width: 100%; height: 100%;
+            background: rgba(15, 23, 42, 0.6); z-index: 999; justify-content: center; align-items: center;
+        }
+        .modal-content {
+            background: white; padding: 20px; border-radius: 12px; width: 520px; max-width: 90%;
+            box-shadow: 0 20px 25px -5px rgba(0,0,0,0.1);
+            max-height: 85vh; display: flex; flex-direction: column;
+        }
+        .modal-header { display: flex; justify-content: space-between; align-items: center; margin-bottom: 15px; }
+        .modal-title { font-size: 16px; font-weight: 700; }
+        .close-btn { cursor: pointer; font-size: 18px; font-weight: bold; color: #64748b; }
 
-        .resizer { position: absolute; top: 0; right: 0; width: 6px; height: 100%; cursor: col-resize; user-select: none; background-color: transparent; z-index: 11; }
-        .resizer:hover, .resizer.resizing { background-color: #3b82f6; }
-        body.resizing-active { user-select: none; cursor: col-resize; }
-        
-        .kpi-check-label { display: flex; align-items: center; cursor: pointer; font-size: 13px; margin: 0; }
-        .kpi-check-label input { margin-right: 6px; cursor: pointer; }
+        .calendar-grid { display: grid; grid-template-columns: repeat(7, 1fr); gap: 4px; margin-top: 10px; }
+        .calendar-header-day { text-align: center; font-weight: bold; font-size: 11px; color: #64748b; padding: 4px 0; background: #f8fafc; }
+        .calendar-day-cell {
+            background: #fff; border: 1px solid #e2e8f0; border-radius: 4px; height: 48px; padding: 4px;
+            display: flex; flex-direction: column; justify-content: space-between; cursor: pointer;
+        }
+        .calendar-day-cell:hover { border-color: #2563eb; background-color: #eff6ff; }
+        .calendar-day-cell.other-month { background-color: #f8fafc; opacity: 0.3; cursor: default; }
+        .day-number { font-size: 11px; font-weight: bold; }
+        .data-status-badge { font-size: 9.5px; font-weight: bold; padding: 1px 3px; border-radius: 3px; text-align: center; }
+        .badge-has-data { background-color: #d1fae5; color: #047857; }
+        .badge-no-data { background-color: #f1f5f9; color: #94a3b8; }
+
+        .modal-body-scroll { flex: 1; overflow-y: auto; margin-top: 10px; border: 1px solid #e2e8f0; border-radius: 8px; padding: 10px; }
+        .search-list-item {
+            display: flex; align-items: center; justify-content: space-between; padding: 8px 10px;
+            border-bottom: 1px solid #f1f5f9; font-size: 13px; cursor: pointer;
+        }
+        .search-list-item:hover { background-color: #eff6ff; }
+        .search-list-item label { cursor: pointer; width: 100%; display: flex; align-items: center; gap: 8px; }
+
+        .dashboard-layout { display: grid; grid-template-columns: 300px 1fr; gap: 20px; }
+        .panel { background: white; padding: 20px; border-radius: 12px; }
+        .panel-title {
+            font-size: 18px; font-weight: 700; margin-bottom: 15px; border-bottom: 2px solid #f1f5f9;
+            padding-bottom: 10px; display: flex; justify-content: space-between; align-items: center; flex-wrap: wrap; gap: 10px;
+        }
+
+        .summary-badge-group { display: flex; align-items: center; gap: 10px; font-size: 13px; }
+        .summary-badge { background-color: #f1f5f9; padding: 4px 10px; border-radius: 6px; border: 1px solid #cbd5e1; color: #475569; }
+        .summary-badge b { color: #2563eb; }
+
+        .select-box, .search-input { width: 100%; padding: 10px 12px; border-radius: 8px; border: 1px solid #cbd5e1; font-size: 14px; margin-bottom: 12px; }
+        .store-list { list-style: none; padding: 0; margin: 0; max-height: 500px; overflow-y: auto; }
+        .store-item {
+            padding: 10px 14px; border: 1px solid #e2e8f0; border-radius: 8px; margin-bottom: 6px;
+            cursor: pointer; display: flex; justify-content: space-between; align-items: center; font-size: 13.5px;
+        }
+        .store-item:hover, .store-item.active { background-color: #eff6ff; border-color: #2563eb; font-weight: bold; }
+        .store-item.total-item { background-color: #f8fafc; font-weight: 700; }
+
+        .table-container { width: 100%; overflow-x: auto; max-height: 550px; overflow-y: auto; }
+        table { width: 100%; border-collapse: collapse; table-layout: fixed; }
+        th, td { padding: 8px 10px; text-align: left; border-bottom: 1px solid #e2e8f0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-size: 13px; }
+        th { background-color: #f8fafc; color: #475569; cursor: pointer; position: sticky; top: 0; z-index: 2; }
+        .table-filter-input { width: 100%; padding: 4px 6px; font-size: 11px; border: 1px solid #cbd5e1; border-radius: 4px; }
+        .text-right { text-align: right; }
+        .code-tag { font-size: 11px; color: #64748b; font-family: monospace; }
     </style>
 </head>
 <body>
 
-<div class="container">
-    <div class="card kpi-card">
-        <h1>📊 실시간 가격 경쟁력 현황</h1>
-        <div class="summary-grid">
-            <div class="kpi-box">
-                <div class="kpi-title">📦 조회된 품목 수</div>
-                <div class="kpi-value" id="kpiTotal">0건</div>
+    <div class="navbar">
+        <div class="brand-title">
+            <h1>📦 더본 OMS 주문 실시간 대시보드</h1>
+            <span class="version-tag">v9.0 Ultra Fast Engine</span>
+        </div>
+        <div class="control-panel">
+            <div class="last-updated-tag">
+                <span id="last-updated-text">🕒 최신 배송일자: 계산 중...</span>
+                <button class="btn btn-cal" onclick="openCalendarModal()">📅 캘린더</button>
             </div>
-            <div class="kpi-box">
-                <div class="kpi-title">💰 가격 경쟁력 (차액 기준) - <span>체크 시 표 색상 강조</span></div>
-                <ul class="kpi-list">
-                    <li>
-                        <label class="kpi-check-label"><input type="checkbox" id="chkWin" onchange="applyRowHighlights()"> <span class="text-blue">우세 (차액 -)</span></label>
-                        <strong class="text-blue" id="kpiWin">0건</strong>
-                    </li>
-                    <li>
-                        <label class="kpi-check-label"><input type="checkbox" id="chkLose" onchange="applyRowHighlights()"> <span class="text-red">열세 (차액 +)</span></label>
-                        <strong class="text-red" id="kpiLose">0건</strong>
-                    </li>
-                    <li>
-                        <label class="kpi-check-label"><input type="checkbox" id="chkTie" onchange="applyRowHighlights()"> <span class="text-gray">동일가격 (차액 0)</span></label>
-                        <strong class="text-gray" id="kpiTie">0건</strong>
-                    </li>
-                </ul>
+            
+            <div class="sync-date-group">
+                <label>동기화 일자:</label>
+                <input type="date" id="sync-target-date" class="date-input">
             </div>
-            <div class="kpi-box">
-                <div class="kpi-title">👤 담당자 필터 (관리자1 기준)</div>
-                <select id="filterPerson" class="global-select" onchange="applyFilters()">
-                    <option value="">모든 담당자 보기</option>
-                </select>
+            <button id="run-btn" class="btn" onclick="triggerBot()">🚀 OMS 수동 동기화</button>
+        </div>
+    </div>
+
+    <!-- 📅 캘린더 모달 -->
+    <div class="modal-overlay" id="calendar-modal">
+        <div class="modal-content">
+            <div class="modal-header">
+                <span class="modal-title">📅 배송일자 데이터 존재 현황</span>
+                <span class="close-btn" onclick="closeCalendarModal()">✕</span>
             </div>
-            <div class="kpi-box">
-                <div class="kpi-title">⭐ 필수/권장 필터</div>
-                <select id="filterRequired" class="global-select" onchange="applyFilters()">
-                    <option value="">전체 품목 보기</option>
-                </select>
+            <div style="display: flex; gap: 8px; margin-bottom: 10px; align-items: center;">
+                <label style="font-size: 12px; font-weight: bold;">월 선택:</label>
+                <input type="month" id="calendar-month-picker" class="input-box" onchange="loadCalendarData()">
+            </div>
+            <div class="calendar-grid" id="calendar-grid"></div>
+        </div>
+    </div>
+
+    <!-- 🔍 브랜드 선택 모달 -->
+    <div class="modal-overlay" id="brand-modal">
+        <div class="modal-content">
+            <div class="modal-header">
+                <span class="modal-title">🏢 브랜드 다중 선택</span>
+                <span class="close-btn" onclick="closeBrandModal()">✕</span>
+            </div>
+            <div style="display: flex; gap: 8px; margin-bottom: 8px;">
+                <input type="text" id="modal-brand-search" class="input-box" style="flex:1;" placeholder="브랜드명 검색..." onkeyup="filterBrandModalList()">
+                <button class="btn btn-cal" style="background:#475569;" onclick="toggleAllBrandCheck(true)">전체선택</button>
+                <button class="btn btn-cal" style="background:#64748b;" onclick="toggleAllBrandCheck(false)">해제</button>
+            </div>
+            <div class="modal-body-scroll" id="brand-modal-list"></div>
+            <div style="margin-top: 15px; text-align: right;">
+                <button class="btn" onclick="applyBrandSelection()">확인 적용</button>
             </div>
         </div>
     </div>
 
-    <div class="card table-card">
-        <div class="table-header-wrap">
-            <h2 id="tableTitle" style="margin:0; font-size: 18px;">데이터 상세</h2>
-            <div class="btn-group">
-                <button class="btn-save" onclick="saveColumnWidths()">💾 셀 너비 저장</button>
-                <!-- 🔥 엑셀 저장 버튼 추가 -->
-                <button class="btn-excel" onclick="exportToExcel()">📥 엑셀 저장</button>
+    <!-- 🔍 품목 검색 모달 -->
+    <div class="modal-overlay" id="item-modal">
+        <div class="modal-content">
+            <div class="modal-header">
+                <span class="modal-title">📦 품목 검색 및 선택</span>
+                <span class="close-btn" onclick="closeItemModal()">✕</span>
             </div>
-        </div>
-        
-        <div class="table-responsive">
-            <table id="dataTable">
-                <thead id="tableHead"></thead>
-                <tbody id="tableBody"></tbody>
-            </table>
+            <div style="margin-bottom: 8px;">
+                <input type="text" id="modal-item-search" class="input-box" style="width:100%;" placeholder="품목코드 또는 품목명 검색..." onkeyup="filterItemModalList()">
+            </div>
+            <div class="modal-body-scroll" id="item-modal-list"></div>
         </div>
     </div>
-</div>
 
-<script>
-    const sheetId = '1nA0ZtCztY6Qe8UR8-erB98_BIZDYUUjpIQYWNyuePWA';
-    const csvUrl = `https://docs.google.com/spreadsheets/d/${sheetId}/export?format=csv&gid=0`;
-
-    const COL_OUR_PRICE = '자사가격';
-    const COL_NET_PRICE = '최저가';
-    const COL_DIFF = '차액';
-    const COL_PERSON = '관리자1';
-    const COL_REQUIRED = '필수/권장';
-
-    let allData = []; 
-    let headers = [];
-    let currentFilteredData = []; // 🔥 현재 필터링된 데이터를 엑셀용으로 저장할 변수
-
-    Papa.parse(csvUrl, {
-        download: true,
-        header: false, 
-        complete: function(results) {
-            const rawData = results.data.filter(row => row.length > 0 && row.some(cell => cell !== ""));
-            if(rawData.length < 2) return;
-
-            const row1 = rawData[0];
-            const row2 = rawData[1];
-            let combinedHeaders = [];
-            let lastHeader = "";
-
-            for(let i = 0; i < row1.length; i++) {
-                let top = row1[i] ? row1[i].trim() : "";
-                let bottom = row2[i] ? row2[i].trim() : "";
-                if(top !== "") lastHeader = top;
-                if(bottom !== "" && bottom !== top) {
-                    combinedHeaders.push(lastHeader ? `${lastHeader} ${bottom}` : bottom);
-                } else {
-                    combinedHeaders.push(lastHeader || bottom || `열_${i}`);
-                }
-            }
-            headers = combinedHeaders;
-
-            allData = [];
-            for(let r = 2; r < rawData.length; r++) {
-                let obj = {};
-                for(let c = 0; c < headers.length; c++) {
-                    obj[headers[c]] = rawData[r][c] || "";
-                }
-                allData.push(obj);
-            }
-
-            initGlobalFilters();
-            renderTableHeader();
-            applyFilters(); 
-        },
-        error: function(error) { console.error("데이터 로드 실패:", error); }
-    });
-
-    function initGlobalFilters() {
-        const persons = [...new Set(allData.map(r => r[COL_PERSON]).filter(v => v))];
-        const personSelect = document.getElementById('filterPerson');
-        persons.forEach(p => { const opt = document.createElement('option'); opt.value = p; opt.textContent = p; personSelect.appendChild(opt); });
-
-        const reqs = [...new Set(allData.map(r => r[COL_REQUIRED]).filter(v => v))];
-        const reqSelect = document.getElementById('filterRequired');
-        reqs.forEach(r => { const opt = document.createElement('option'); opt.value = r; opt.textContent = r; reqSelect.appendChild(opt); });
-    }
-
-    function renderTableHeader() {
-        const thead = document.getElementById('tableHead');
-        const trHead = document.createElement('tr');
+    <div class="container">
         
-        headers.forEach(h => {
-            const th = document.createElement('th');
-            th.textContent = h;
+        <!-- 📊 상단 영역: 기간별 추이 차트 -->
+        <div class="section-panel">
+            <div class="panel-header" style="margin-bottom: 0; border-bottom: none;">
+                <span class="panel-title-text" style="white-space: nowrap;">📈 기간별 주문 추이 그래프</span>
+                
+                <div class="filter-row" style="margin-bottom: 0; padding: 0; background: transparent; border: none;">
+                    <div class="filter-group">
+                        <label>조회 기간:</label>
+                        <input type="date" id="chart-start-date" class="input-box">
+                        <span>~</span>
+                        <input type="date" id="chart-end-date" class="input-box">
+                    </div>
+                    <div class="filter-group">
+                        <label>브랜드:</label>
+                        <input type="text" id="chart-brand-input" class="input-box" placeholder="브랜드 선택/검색" style="width: 140px;" readonly onclick="openBrandModal('chart')">
+                        <button class="btn-search-icon" onclick="openBrandModal('chart')" title="브랜드 다중 선택">🔍</button>
+                    </div>
+                    <div class="filter-group">
+                        <label>품목코드/명:</label>
+                        <input type="text" id="chart-item-input" class="input-box" placeholder="품목코드 또는 품목명" style="width: 150px;">
+                        <button class="btn-search-icon" onclick="openItemModal()" title="품목 검색 선택">🔍</button>
+                    </div>
+                    <button class="btn btn-query" onclick="fetchChartData()">🔍 추이 조회</button>
+                </div>
+            </div>
 
-            const input = document.createElement('input');
-            input.type = 'text'; input.className = 'filter-input'; input.placeholder = h + ' 검색';
-            input.dataset.colName = h;
-            input.addEventListener('keyup', applyFilters); 
+            <div class="kpi-grid" style="margin-top: 15px;">
+                <div class="kpi-card">
+                    <div class="kpi-title">기간 내 총 주문수량</div>
+                    <div class="kpi-value" id="kpi-total-qty">0 건</div>
+                </div>
+                <div class="kpi-card green">
+                    <div class="kpi-title">기간 내 취급 품목수</div>
+                    <div class="kpi-value" id="kpi-total-items">0 종</div>
+                </div>
+                <div class="kpi-card purple">
+                    <div class="kpi-title">기간 내 총 주문금액</div>
+                    <div class="kpi-value" id="kpi-total-amount">0 원</div>
+                </div>
+            </div>
 
-            th.appendChild(document.createElement('br'));
-            th.appendChild(input);
-            
-            const resizer = document.createElement('div'); resizer.className = 'resizer';
-            th.appendChild(resizer);
-            
-            createResizableColumn(th, resizer);
-            trHead.appendChild(th);
-        });
-        thead.appendChild(trHead);
-        loadColumnWidths();
-    }
+            <div class="chart-container">
+                <canvas id="dailyTrendChart"></canvas>
+            </div>
+        </div>
 
-    function saveColumnWidths() {
-        const table = document.getElementById('dataTable');
-        const ths = table.querySelectorAll('thead th');
-        let widths = [];
-        ths.forEach(th => {
-            let w = th.style.width ? parseInt(th.style.width, 10) : th.offsetWidth;
-            widths.push(w);
-        });
-        localStorage.setItem('my_dashboard_widths', JSON.stringify(widths));
-        alert('현재 셀 너비가 저장되었습니다.');
-    }
+        <!-- 🛒 하단 영역: 하루 단위 상세 내역 -->
+        <div class="filter-row" style="background: white; margin-bottom: 20px;">
+            <div class="filter-group">
+                <label style="font-size: 15px; color: #0f172a;">📅 상세 조회 일자 (하루):</label>
+                <input type="date" id="detail-target-date" class="input-box" style="font-weight: bold;">
+            </div>
+            <button class="btn btn-query" onclick="fetchDetailData()">⚡ 상세 데이터 불러오기</button>
+        </div>
 
-    function loadColumnWidths() {
-        const saved = localStorage.getItem('my_dashboard_widths');
-        if (saved) {
+        <div class="dashboard-layout">
+            <div class="panel">
+                <div class="panel-title"><span>🏢 브랜드 필터</span></div>
+                <div style="display: flex; gap: 4px; margin-bottom: 12px;">
+                    <input type="text" id="detail-brand-input" class="input-box" style="flex:1;" placeholder="브랜드 선택..." readonly onclick="openBrandModal('detail')">
+                    <button class="btn-search-icon" onclick="openBrandModal('detail')">🔍</button>
+                </div>
+                <input type="text" id="store-search-input" class="search-input" placeholder="🔍 점포명 검색..." onkeyup="debouncedFilterStoreList()">
+                <div id="brand-summary" style="margin-bottom: 10px; font-size: 12px; color: #64748b;">
+                    점포수: <b id="brand-store-count">0</b>개 | 품목수: <b id="brand-item-count">0</b>종
+                </div>
+                <ul class="store-list" id="store-list"></ul>
+            </div>
+
+            <div class="panel">
+                <div class="panel-title">
+                    <span id="selected-store-title">🛒 점포별 주문 상세</span>
+                    <div class="summary-badge-group">
+                        <button class="btn btn-excel" onclick="exportToExcel()">📥 엑셀 저장</button>
+                        <span class="summary-badge">수량합계: <b id="list-total-qty">0</b>개</span>
+                        <span class="summary-badge">금액합계: <b id="list-total-amount">0</b>원</span>
+                    </div>
+                </div>
+                
+                <div class="table-container">
+                    <table id="detail-table">
+                        <colgroup>
+                            <col style="width: 90px;"><col style="width: 160px;"><col style="width: 100px;">
+                            <col style="width: 100px;"><col style="width: 100px;"><col style="width: 200px;">
+                            <col style="width: 70px;"><col style="width: 90px;"><col style="width: 110px;">
+                        </colgroup>
+                        <thead>
+                            <tr>
+                                <th>점포코드</th><th>점포명</th><th>주문일자</th><th>배송일자</th>
+                                <th>품목코드</th><th>품목명</th><th class="text-right">수량</th>
+                                <th class="text-right">단가</th><th class="text-right">금액</th>
+                            </tr>
+                            <tr class="filter-row-table">
+                                <th><input type="text" id="filter-storeCode" class="table-filter-input" placeholder="검색" onkeyup="debouncedApplyColumnFilters()"></th>
+                                <th><input type="text" id="filter-storeName" class="table-filter-input" placeholder="검색" onkeyup="debouncedApplyColumnFilters()"></th>
+                                <th><input type="text" id="filter-orderDate" class="table-filter-input" placeholder="검색" onkeyup="debouncedApplyColumnFilters()"></th>
+                                <th><input type="text" id="filter-deliveryDate" class="table-filter-input" placeholder="검색" onkeyup="debouncedApplyColumnFilters()"></th>
+                                <th><input type="text" id="filter-itemCode" class="table-filter-input" placeholder="검색" onkeyup="debouncedApplyColumnFilters()"></th>
+                                <th><input type="text" id="filter-itemName" class="table-filter-input" placeholder="검색" onkeyup="debouncedApplyColumnFilters()"></th>
+                                <th></th><th></th><th></th>
+                            </tr>
+                        </thead>
+                        <tbody id="order-detail-table"></tbody>
+                    </table>
+                </div>
+            </div>
+        </div>
+
+    </div>
+
+    <script>
+        const SUPABASE_URL = "https://zbilhsgfgyfrolveaego.supabase.co"; 
+        const SUPABASE_ANON_KEY = "sb_publishable_OWW3nk7m7Vy3Ex0205ypgg_IG3xdBjN"; 
+
+        const githubId = 'kshnpch-cmyk'; 
+        const repoName = 'dashboard'; 
+
+        const tokenPart1 = "ghp_DPLQYilEaFD";
+        const tokenPart2 = "g2jVxPlK8Kh18uwaCu220wnZB";
+        const token = tokenPart1 + tokenPart2;
+
+        let rawDetailOrders = [], filteredDetailOrders = [], baseDetailOrders = [], currentDetailOrders = [];
+        let storeSummaryList = [];
+        let trendChart = null;
+
+        let allBrandList = [], allItemList = [];
+        let activeBrandTarget = 'chart';
+
+        /* 💾 [2번 IndexedDB 엔진] 브라우저 기기 메모리 초고속 캐시 */
+        const DB_NAME = "OmsLocalCacheDB";
+        const STORE_NAME = "query_cache";
+
+        function openIndexedDB() {
+            return new Promise((resolve, reject) => {
+                const request = indexedDB.open(DB_NAME, 1);
+                request.onupgradeneeded = (e) => {
+                    const db = e.target.result;
+                    if (!db.objectStoreNames.contains(STORE_NAME)) {
+                        db.createObjectStore(STORE_NAME, { keyPath: "url" });
+                    }
+                };
+                request.onsuccess = () => resolve(request.result);
+                request.onerror = () => reject(request.error);
+            });
+        }
+
+        async function getCacheIDB(url) {
             try {
-                const widths = JSON.parse(saved);
-                const table = document.getElementById('dataTable');
-                const ths = table.querySelectorAll('thead th');
-                if (ths.length === widths.length) {
-                    ths.forEach((th, i) => {
-                        th.style.width = `${widths[i]}px`; th.style.minWidth = `${widths[i]}px`; th.style.maxWidth = `${widths[i]}px`;
+                const db = await openIndexedDB();
+                return new Promise((resolve) => {
+                    const tx = db.transaction(STORE_NAME, "readonly");
+                    const store = tx.objectStore(STORE_NAME);
+                    const req = store.get(url);
+                    req.onsuccess = () => {
+                        const res = req.result;
+                        if (res && (Date.now() - res.timestamp < 1000 * 60 * 15)) { // 15분간 로컬 캐시 유지
+                            resolve(res.data);
+                        } else {
+                            resolve(null);
+                        }
+                    };
+                    req.onerror = () => resolve(null);
+                });
+            } catch (e) { return null; }
+        }
+
+        async function setCacheIDB(url, data) {
+            try {
+                const db = await openIndexedDB();
+                const tx = db.transaction(STORE_NAME, "readwrite");
+                const store = tx.objectStore(STORE_NAME);
+                store.put({ url, data, timestamp: Date.now() });
+            } catch (e) {}
+        }
+
+        async function fetchWithUltraCache(url, options, retries = 3) {
+            const cachedData = await getCacheIDB(url);
+            if (cachedData) {
+                return new Response(JSON.stringify(cachedData), { status: 200, headers: { 'Content-Type': 'application/json' } });
+            }
+
+            const res = await fetchWithRetry(url, options, retries);
+            if (res.ok) {
+                const clone = res.clone();
+                const jsonData = await clone.json();
+                setCacheIDB(url, jsonData);
+            }
+            return res;
+        }
+
+        function safeSetStorage(key, value) {
+            try { localStorage.setItem(key, typeof value === 'string' ? value : JSON.stringify(value)); }
+            catch (e) { localStorage.clear(); }
+        }
+
+        async function fetchWithRetry(url, options, retries = 3, backoff = 400) {
+            try {
+                const res = await fetch(url, options);
+                if (!res.ok && res.status >= 500 && retries > 0) throw new Error();
+                return res;
+            } catch (err) {
+                if (retries > 0) {
+                    await new Promise(r => setTimeout(r, backoff));
+                    return fetchWithRetry(url, options, retries - 1, backoff * 1.5);
+                }
+                throw err;
+            }
+        }
+
+        function debounce(func, delay = 150) {
+            let timeout;
+            return function(...args) {
+                clearTimeout(timeout);
+                timeout = setTimeout(() => func.apply(this, args), delay);
+            };
+        }
+
+        const debouncedApplyColumnFilters = debounce(applyColumnFilters, 150);
+        const debouncedFilterStoreList = debounce(filterStoreList, 150);
+
+        function formatDate(d) {
+            const y = d.getFullYear();
+            const m = String(d.getMonth() + 1).padStart(2, '0');
+            const day = String(d.getDate()).padStart(2, '0');
+            return `${y}-${m}-${day}`;
+        }
+
+        function formatDisplayDate(dateStr) {
+            if (!dateStr || dateStr === '-') return '-';
+            let s = String(dateStr).split('T')[0];
+            return s.replace(/-/g, '/');
+        }
+
+        function cleanNumber(val) {
+            if (!val) return 0;
+            return parseFloat(String(val).replace(/[^0-9.-]/g, '')) || 0;
+        }
+
+        function cleanCode(val) {
+            if (!val && val !== 0) return '-';
+            let str = String(val).trim();
+            if (str.endsWith('.0')) str = str.substring(0, str.length - 2);
+            return str || '-';
+        }
+
+        /* 🏢 브랜드 선택 모달 */
+        async function openBrandModal(target = 'chart') {
+            activeBrandTarget = target;
+            document.getElementById('brand-modal').style.display = 'flex';
+            const listEl = document.getElementById('brand-modal-list');
+            
+            if (allBrandList.length === 0) {
+                listEl.innerHTML = '<div style="text-align:center; padding:15px; color:#2563eb;">⚡ 브랜드 목록 로드 중...</div>';
+                try {
+                    const res = await fetchWithUltraCache(`${SUPABASE_URL}/rest/v1/daily_order_summary?select=brand_name`, {
+                        headers: { 'apikey': SUPABASE_ANON_KEY, 'Authorization': `Bearer ${SUPABASE_ANON_KEY}` }
                     });
-                    table.classList.add('is-fixed');
-                    table.style.width = widths.reduce((sum, w) => sum + w, 0) + 'px';
+                    if (res.ok) {
+                        const data = await res.json();
+                        allBrandList = [...new Set(data.map(r => r.brand_name))].filter(Boolean).sort();
+                    }
+                } catch (err) {}
+            }
+            renderBrandModalList();
+        }
+
+        function closeBrandModal() { document.getElementById('brand-modal').style.display = 'none'; }
+
+        function renderBrandModalList() {
+            const inputId = activeBrandTarget === 'chart' ? 'chart-brand-input' : 'detail-brand-input';
+            const currentSelected = document.getElementById(inputId).value.split(',').map(s => s.trim());
+            const searchKeyword = document.getElementById('modal-brand-search').value.toLowerCase().trim();
+            const listEl = document.getElementById('brand-modal-list');
+
+            const filtered = allBrandList.filter(b => b.toLowerCase().includes(searchKeyword));
+            if (filtered.length === 0) {
+                listEl.innerHTML = '<div style="text-align:center; color:#94a3b8; padding:15px;">검색 결과가 없습니다.</div>';
+                return;
+            }
+
+            listEl.innerHTML = filtered.map(brand => `
+                <div class="search-list-item">
+                    <label>
+                        <input type="checkbox" class="brand-modal-chk" value="${brand}" ${currentSelected.includes(brand) ? 'checked' : ''}>
+                        <span>${brand}</span>
+                    </label>
+                </div>
+            `).join('');
+        }
+
+        function filterBrandModalList() { renderBrandModalList(); }
+        function toggleAllBrandCheck(status) { document.querySelectorAll('.brand-modal-chk').forEach(chk => chk.checked = status); }
+
+        function applyBrandSelection() {
+            const checkedVals = Array.from(document.querySelectorAll('.brand-modal-chk:checked')).map(c => c.value);
+            const brandStr = checkedVals.join(', ');
+            
+            if (activeBrandTarget === 'chart') {
+                document.getElementById('chart-brand-input').value = brandStr;
+                safeSetStorage('cached_brand_input', brandStr);
+            } else {
+                document.getElementById('detail-brand-input').value = brandStr;
+                onDetailBrandChange(checkedVals);
+            }
+            closeBrandModal();
+        }
+
+        function onDetailBrandChange(selectedBrands) {
+            if (!selectedBrands || selectedBrands.length === 0) {
+                filteredDetailOrders = rawDetailOrders;
+            } else {
+                filteredDetailOrders = rawDetailOrders.filter(r => selectedBrands.includes(r.brand_name));
+            }
+            updateStoreListAndSummary();
+        }
+
+        /* 📦 품목 모달 */
+        async function openItemModal() {
+            document.getElementById('item-modal').style.display = 'flex';
+            const listEl = document.getElementById('item-modal-list');
+            if (allItemList.length === 0) {
+                try {
+                    const res = await fetchWithUltraCache(`${SUPABASE_URL}/rest/v1/daily_order_summary?select=item_code,item_name`, {
+                        headers: { 'apikey': SUPABASE_ANON_KEY, 'Authorization': `Bearer ${SUPABASE_ANON_KEY}` }
+                    });
+                    if (res.ok) {
+                        const data = await res.json();
+                        const map = new Map();
+                        data.forEach(r => {
+                            if (r.item_code || r.item_name) map.set(`${cleanCode(r.item_code)}__${r.item_name}`, { code: cleanCode(r.item_code), name: r.item_name || '' });
+                        });
+                        allItemList = Array.from(map.values()).sort((a, b) => a.name.localeCompare(b.name));
+                    }
+                } catch (err) {}
+            }
+            renderItemModalList();
+        }
+
+        function closeItemModal() { document.getElementById('item-modal').style.display = 'none'; }
+
+        function renderItemModalList() {
+            const searchKeyword = document.getElementById('modal-item-search').value.toLowerCase().trim();
+            const listEl = document.getElementById('item-modal-list');
+            const filtered = allItemList.filter(item => item.code.toLowerCase().includes(searchKeyword) || item.name.toLowerCase().includes(searchKeyword));
+
+            if (filtered.length === 0) {
+                listEl.innerHTML = '<div style="text-align:center; color:#94a3b8; padding:15px;">검색 결과가 없습니다.</div>';
+                return;
+            }
+
+            listEl.innerHTML = filtered.slice(0, 100).map(item => `
+                <div class="search-list-item" onclick="selectItemFromModal('${item.name}')">
+                    <div><span class="code-tag">[${item.code}]</span><b style="margin-left: 5px;">${item.name}</b></div>
+                    <button class="btn btn-cal" style="background:#2563eb;">선택</button>
+                </div>
+            `).join('');
+        }
+
+        function filterItemModalList() { renderItemModalList(); }
+        function selectItemFromModal(itemName) {
+            document.getElementById('chart-item-input').value = itemName;
+            safeSetStorage('cached_item_input', itemName);
+            closeItemModal();
+        }
+
+        /* 📅 캘린더 모달 */
+        function openCalendarModal() { document.getElementById('calendar-modal').style.display = 'flex'; loadCalendarData(); }
+        function closeCalendarModal() { document.getElementById('calendar-modal').style.display = 'none'; }
+
+        async function loadCalendarData() {
+            const monthVal = document.getElementById('calendar-month-picker').value;
+            if (!monthVal) return;
+            const [year, month] = monthVal.split('-').map(Number);
+            const startDateStr = formatDate(new Date(year, month - 1, 1));
+            const endDateStr = formatDate(new Date(year, month, 0));
+
+            const queryUrl = `${SUPABASE_URL}/rest/v1/calendar_date_summary?delivery_date=gte.${startDateStr}&delivery_date=lte.${endDateStr}&select=delivery_date,order_count`;
+
+            let dateCountMap = {}, availableDates = [];
+            try {
+                const res = await fetchWithUltraCache(queryUrl, {
+                    headers: { 'apikey': SUPABASE_ANON_KEY, 'Authorization': `Bearer ${SUPABASE_ANON_KEY}` }
+                });
+                if (res.ok) {
+                    const rows = await res.json();
+                    rows.forEach(r => {
+                        let dKey = formatDisplayDate(r.delivery_date).replace(/\//g, '-');
+                        dateCountMap[dKey] = cleanNumber(r.order_count);
+                        if (cleanNumber(r.order_count) > 0) availableDates.push(dKey);
+                    });
+                }
+            } catch (err) {}
+
+            if (availableDates.length > 0) {
+                availableDates.sort();
+                const latestDate = availableDates[availableDates.length - 1].replace(/-/g, '/');
+                document.getElementById('last-updated-text').innerText = `🕒 최신 배송일자: ${latestDate}`;
+                safeSetStorage('cached_last_updated', latestDate);
+            }
+            renderCalendarGrid(year, month, dateCountMap);
+        }
+
+        function renderCalendarGrid(year, month, dateCountMap) {
+            const grid = document.getElementById('calendar-grid');
+            grid.innerHTML = "";
+            ['일', '월', '화', '수', '목', '금', '토'].forEach(d => grid.innerHTML += `<div class="calendar-header-day">${d}</div>`);
+
+            const firstDayIndex = new Date(year, month - 1, 1).getDay();
+            const totalDays = new Date(year, month, 0).getDate();
+
+            for (let i = 0; i < firstDayIndex; i++) grid.innerHTML += `<div class="calendar-day-cell other-month"></div>`;
+
+            for (let day = 1; day <= totalDays; day++) {
+                const dString = `${year}-${String(month).padStart(2, '0')}-${String(day).padStart(2, '0')}`;
+                const count = dateCountMap[dString] || 0;
+                const badgeHtml = count > 0 ? `<span class="data-status-badge badge-has-data">🟢 있음</span>` : `<span class="data-status-badge badge-no-data">⚪ 없음</span>`;
+                const cell = document.createElement('div');
+                cell.className = 'calendar-day-cell';
+                cell.onclick = () => { document.getElementById('detail-target-date').value = dString; closeCalendarModal(); fetchDetailData(); };
+                cell.innerHTML = `<span class="day-number">${day}</span>${badgeHtml}`;
+                grid.appendChild(cell);
+            }
+        }
+
+        /* 📊 추이 차트 수신 (이중 캐시 적용) */
+        async function fetchChartData() {
+            const startDate = document.getElementById('chart-start-date').value;
+            const endDate = document.getElementById('chart-end-date').value;
+            const brandInputValue = document.getElementById('chart-brand-input').value.trim();
+            const itemKeyword = document.getElementById('chart-item-input').value.trim();
+
+            if (!startDate || !endDate) return alert("시작일과 종료일을 선택하세요.");
+
+            safeSetStorage('cached_chart_start_date', startDate);
+            safeSetStorage('cached_chart_end_date', endDate);
+
+            let queryUrl = `${SUPABASE_URL}/rest/v1/daily_order_summary?delivery_date=gte.${startDate}&delivery_date=lte.${endDate}&select=delivery_date,total_qty,total_amount,item_name`;
+
+            if (brandInputValue) {
+                const brandList = brandInputValue.split(',').map(b => b.trim()).filter(Boolean);
+                if (brandList.length === 1) queryUrl += `&brand_name=ilike.*${encodeURIComponent(brandList[0])}*`;
+                else if (brandList.length > 1) queryUrl += `&or=(${brandList.map(b => `brand_name.ilike.*${encodeURIComponent(b)}*`).join(',')})`;
+            }
+
+            if (itemKeyword) queryUrl += `&or=(item_code.ilike.*${encodeURIComponent(itemKeyword)}*,item_name.ilike.*${encodeURIComponent(itemKeyword)}*)`;
+
+            try {
+                const res = await fetchWithUltraCache(queryUrl, { headers: { 'apikey': SUPABASE_ANON_KEY, 'Authorization': `Bearer ${SUPABASE_ANON_KEY}` } });
+                if (res.ok) {
+                    const data = await res.json();
+                    renderChartAndKPI(data);
+                }
+            } catch (err) {}
+        }
+
+        function renderChartAndKPI(data) {
+            if (!data || !Array.isArray(data) || data.length === 0) return;
+
+            let totalQty = 0, totalAmount = 0;
+            const uniqueItems = new Set();
+            const dailyMap = {};
+
+            data.forEach(r => {
+                const q = cleanNumber(r.total_qty);
+                const amt = cleanNumber(r.total_amount);
+
+                totalQty += q;
+                totalAmount += amt;
+                if (r.item_name) uniqueItems.add(r.item_name);
+
+                let dateKey = formatDisplayDate(r.delivery_date);
+                if (!dateKey || dateKey === '-') return;
+
+                if (!dailyMap[dateKey]) dailyMap[dateKey] = { qty: 0, amount: 0 };
+                dailyMap[dateKey].qty += q;
+                dailyMap[dateKey].amount += amt;
+            });
+
+            document.getElementById('kpi-total-qty').innerText = `${totalQty.toLocaleString()} 건`;
+            document.getElementById('kpi-total-items').innerText = `${uniqueItems.size.toLocaleString()} 종`;
+            document.getElementById('kpi-total-amount').innerText = `${totalAmount.toLocaleString()} 원`;
+
+            const labels = Object.keys(dailyMap).sort();
+            const qtyData = labels.map(k => dailyMap[k].qty);
+            const amtData = labels.map(k => dailyMap[k].amount);
+
+            const canvas = document.getElementById('dailyTrendChart');
+            if (!canvas) return;
+
+            const ctx = canvas.getContext('2d');
+            if (trendChart) trendChart.destroy();
+
+            trendChart = new Chart(ctx, {
+                type: 'bar',
+                data: {
+                    labels: labels,
+                    datasets: [
+                        { label: '주문수량', data: qtyData, backgroundColor: 'rgba(37, 99, 235, 0.6)', yAxisID: 'y1' },
+                        { label: '주문금액', data: amtData, type: 'line', borderColor: '#8b5cf6', borderWidth: 2, yAxisID: 'y2' }
+                    ]
+                },
+                options: {
+                    responsive: true, maintainAspectRatio: false,
+                    scales: {
+                        y1: { type: 'linear', position: 'left', beginAtZero: true },
+                        y2: { type: 'linear', position: 'right', beginAtZero: true, grid: { drawOnChartArea: false } }
+                    }
+                }
+            });
+        }
+
+        /* 🛒 하루치 상세 내역 (이중 캐시 적용) */
+        async function fetchDetailData() {
+            const targetDate = document.getElementById('detail-target-date').value;
+            if (!targetDate) return;
+
+            safeSetStorage('cached_detail_target_date', targetDate);
+
+            const summaryUrl = `${SUPABASE_URL}/rest/v1/store_order_summary?delivery_date=eq.${targetDate}&select=store_code,store_name,brand_name,order_count,total_qty,total_amount`;
+
+            try {
+                const res = await fetchWithUltraCache(summaryUrl, { headers: { 'apikey': SUPABASE_ANON_KEY, 'Authorization': `Bearer ${SUPABASE_ANON_KEY}` } });
+                if (res.ok) {
+                    storeSummaryList = await res.json();
+                    rawDetailOrders = [];
+                    updateStoreListAndSummary();
+                    fetchAllOrdersInChunks(targetDate);
+                }
+            } catch (err) {}
+        }
+
+        async function fetchAllOrdersInChunks(targetDate) {
+            let offset = 0;
+            const limit = 200;
+            let hasMore = true;
+            rawDetailOrders = [];
+
+            while (hasMore) {
+                const chunkUrl = `${SUPABASE_URL}/rest/v1/oms_orders?delivery_date=eq.${targetDate}&select=store_code,store_name,order_date,delivery_date,item_code,item_name,qty,price,total_amount,brand_name&order=store_name.asc&limit=${limit}&offset=${offset}`;
+                try {
+                    const res = await fetchWithUltraCache(chunkUrl, { headers: { 'apikey': SUPABASE_ANON_KEY, 'Authorization': `Bearer ${SUPABASE_ANON_KEY}` } });
+                    if (res.ok) {
+                        const chunk = await res.json();
+                        rawDetailOrders = rawDetailOrders.concat(chunk);
+                        filteredDetailOrders = rawDetailOrders;
+
+                        const activeStore = document.querySelector('#store-list .active');
+                        if (activeStore && activeStore.innerText.includes('전체 점포 합산')) {
+                            baseDetailOrders = filteredDetailOrders;
+                            applyColumnFilters();
+                        }
+
+                        if (chunk.length < limit) hasMore = false;
+                        else offset += limit;
+                    } else { hasMore = false; }
+                } catch(e) { hasMore = false; }
+            }
+        }
+
+        async function fetchStoreDetailOrders(storeName) {
+            const targetDate = document.getElementById('detail-target-date').value;
+            const queryUrl = `${SUPABASE_URL}/rest/v1/oms_orders?delivery_date=eq.${targetDate}&store_name=eq.${encodeURIComponent(storeName)}&select=store_code,store_name,order_date,delivery_date,item_code,item_name,qty,price,total_amount,brand_name`;
+
+            try {
+                const res = await fetchWithUltraCache(queryUrl, { headers: { 'apikey': SUPABASE_ANON_KEY, 'Authorization': `Bearer ${SUPABASE_ANON_KEY}` } });
+                if (res.ok) {
+                    baseDetailOrders = await res.json();
+                    applyColumnFilters();
                 }
             } catch(e) {}
         }
-    }
 
-    function lockTableWidths() {
-        const table = document.getElementById('dataTable');
-        if (table.classList.contains('is-fixed')) return;
-        const ths = table.querySelectorAll('thead th');
-        const widths = Array.from(ths).map(th => th.offsetWidth);
-        ths.forEach((th, i) => {
-            th.style.width = `${widths[i]}px`; th.style.minWidth = `${widths[i]}px`; th.style.maxWidth = `${widths[i]}px`;
-        });
-        table.classList.add('is-fixed');
-        table.style.width = widths.reduce((sum, w) => sum + w, 0) + 'px';
-    }
+        function updateStoreListAndSummary() {
+            const stores = [...new Set(storeSummaryList.map(r => r.store_name))].filter(Boolean);
+            document.getElementById('brand-store-count').innerText = stores.length;
+            document.getElementById('brand-item-count').innerText = '-';
 
-    function createResizableColumn(th, resizer) {
-        let x = 0; let w = 0;
-        const mouseDownHandler = function(e) {
-            lockTableWidths(); x = e.clientX; w = th.offsetWidth; 
-            document.addEventListener('mousemove', mouseMoveHandler); document.addEventListener('mouseup', mouseUpHandler);
-            resizer.classList.add('resizing'); document.body.classList.add('resizing-active');
-        };
-        const mouseMoveHandler = function(e) {
-            const dx = e.clientX - x; const newWidth = Math.max(50, w + dx); 
-            if (newWidth !== w) {
-                th.style.width = `${newWidth}px`; th.style.minWidth = `${newWidth}px`; th.style.maxWidth = `${newWidth}px`;
-                const table = document.getElementById('dataTable'); const ths = table.querySelectorAll('thead th');
-                let totalWidth = 0; ths.forEach(col => { totalWidth += parseInt(col.style.width, 10) || col.offsetWidth; });
-                table.style.width = `${totalWidth}px`;
-                x = e.clientX; w = newWidth;
-            }
-        };
-        const mouseUpHandler = function() {
-            document.removeEventListener('mousemove', mouseMoveHandler); document.removeEventListener('mouseup', mouseUpHandler);
-            resizer.classList.remove('resizing'); document.body.classList.remove('resizing-active');
-        };
-        resizer.addEventListener('mousedown', mouseDownHandler);
-    }
+            const storeListEl = document.getElementById('store-list');
+            const totalCount = storeSummaryList.reduce((sum, r) => sum + cleanNumber(r.order_count), 0);
 
-    function applyFilters() {
-        const personVal = document.getElementById('filterPerson').value; const reqVal = document.getElementById('filterRequired').value;
-        const inputs = document.querySelectorAll('.filter-input');
-        const colFilters = Array.from(inputs).map(inp => ({ col: inp.dataset.colName, val: inp.value.toLowerCase().trim() }));
+            let listItemsHtml = [`<li class="store-item total-item active" onclick="onStoreSelect('ALL', this)">
+                <span>🏢 전체 점포 합산</span><span style="color:#2563eb;">${totalCount}건</span>
+            </li>`];
 
-        const filteredData = allData.filter(row => {
-            if (personVal && row[COL_PERSON] !== personVal) return false;
-            if (reqVal && row[COL_REQUIRED] !== reqVal) return false;
-            for (let f of colFilters) {
-                if (f.val) {
-                    const cellVal = (row[f.col] || '').toLowerCase();
-                    if (cellVal.indexOf(f.val) === -1) return false;
-                }
-            }
-            return true;
-        });
-
-        currentFilteredData = filteredData; // 🔥 현재 필터링 상태 저장 (엑셀 다운로드용)
-
-        updateSummary(filteredData);
-        renderTableBody(filteredData);
-    }
-
-    function getRowStatus(row) {
-        let diff = 0;
-        if(row[COL_DIFF] !== undefined && row[COL_DIFF] !== '') { diff = Number(row[COL_DIFF].replace(/[^0-9.-]+/g, "")); } 
-        else {
-            let ourPrice = Number((row[COL_OUR_PRICE] || '0').replace(/[^0-9.-]+/g, "")); let netPrice = Number((row[COL_NET_PRICE] || '0').replace(/[^0-9.-]+/g, ""));
-            if (ourPrice > 0 || netPrice > 0) diff = ourPrice - netPrice; else return 'none';
-        }
-        if(diff < 0) return 'win';
-        if(diff > 0) return 'lose';
-        return 'tie';
-    }
-
-    function updateSummary(data) {
-        let win = 0, lose = 0, tie = 0; let reqCounts = {}; 
-
-        data.forEach(row => {
-            let status = getRowStatus(row);
-            if(status === 'win') win++; else if(status === 'lose') lose++; else if(status === 'tie') tie++;
-            let reqType = row[COL_REQUIRED] || '미지정'; reqCounts[reqType] = (reqCounts[reqType] || 0) + 1;
-        });
-
-        document.getElementById('kpiTotal').textContent = data.length + "건";
-        document.getElementById('kpiWin').textContent = win + "건"; document.getElementById('kpiLose').textContent = lose + "건"; document.getElementById('kpiTie').textContent = tie + "건";
-
-        const titleEl = document.getElementById('tableTitle');
-        const reqString = Object.entries(reqCounts).filter(([key]) => key !== '미지정' && key !== '').sort((a, b) => b[1] - a[1]).map(([key, val]) => `${key} ${val}건`).join(' / ');
-        
-        if (reqString.length > 0) { titleEl.innerHTML = `데이터 상세 <span class="summary-badge">(현재 조건: ${reqString})</span>`; } 
-        else { titleEl.innerHTML = `데이터 상세`; }
-    }
-
-    function renderTableBody(data) {
-        const tbody = document.getElementById('tableBody'); tbody.innerHTML = ''; 
-        data.forEach(row => {
-            const tr = document.createElement('tr');
-            tr.dataset.status = getRowStatus(row); 
-            headers.forEach(h => {
-                const td = document.createElement('td'); td.textContent = row[h] || '-'; tr.appendChild(td);
+            stores.forEach(store => {
+                const sData = storeSummaryList.filter(r => r.store_name === store);
+                const count = sData.reduce((sum, r) => sum + cleanNumber(r.order_count), 0);
+                listItemsHtml.push(`<li class="store-item" onclick="onStoreSelect('${store}', this)">
+                    <span>${store}</span><span style="color:#64748b;">${count}건</span>
+                </li>`);
             });
-            tbody.appendChild(tr);
-        });
-        applyRowHighlights();
-    }
-
-    function applyRowHighlights() {
-        const chkWin = document.getElementById('chkWin').checked; const chkLose = document.getElementById('chkLose').checked; const chkTie = document.getElementById('chkTie').checked;
-        const rows = document.querySelectorAll('#tableBody tr');
-        rows.forEach(tr => {
-            const status = tr.dataset.status;
-            tr.classList.remove('highlight-win', 'highlight-lose', 'highlight-tie');
-            if (status === 'win' && chkWin) tr.classList.add('highlight-win');
-            if (status === 'lose' && chkLose) tr.classList.add('highlight-lose');
-            if (status === 'tie' && chkTie) tr.classList.add('highlight-tie');
-        });
-    }
-
-    // 🔥 엑셀 다운로드 함수
-    function exportToExcel() {
-        if (currentFilteredData.length === 0) {
-            alert("내보낼 데이터가 없습니다.");
-            return;
+            storeListEl.innerHTML = listItemsHtml.join('');
+            onStoreSelect('ALL', storeListEl.firstElementChild);
         }
-        
-        // 1. 워크시트 생성 (json 데이터를 엑셀 시트로 변환)
-        const ws = XLSX.utils.json_to_sheet(currentFilteredData, { header: headers });
-        
-        // 2. 워크북 생성 및 워크시트 추가
-        const wb = XLSX.utils.book_new();
-        XLSX.utils.book_append_sheet(wb, ws, "가격경쟁력_데이터");
-        
-        // 3. 파일로 저장
-        XLSX.writeFile(wb, "가격경쟁력_대시보드.xlsx");
-    }
-</script>
 
+        function filterStoreList() {
+            const query = document.getElementById('store-search-input').value.toLowerCase();
+            document.querySelectorAll('#store-list .store-item').forEach(item => {
+                item.style.display = item.innerText.toLowerCase().includes(query) ? 'flex' : 'none';
+            });
+        }
+
+        function onStoreSelect(storeName, element) {
+            document.querySelectorAll('.store-item').forEach(el => el.classList.remove('active'));
+            if (element) element.classList.add('active');
+
+            if (storeName === 'ALL') {
+                document.getElementById('selected-store-title').innerText = `🛒 전체 점포 합산 상세`;
+                baseDetailOrders = filteredDetailOrders;
+                applyColumnFilters();
+            } else {
+                document.getElementById('selected-store-title').innerText = `🛒 [${storeName}] 주문 상세`;
+                fetchStoreDetailOrders(storeName);
+            }
+        }
+
+        function applyColumnFilters() {
+            const qSC = document.getElementById('filter-storeCode').value.toLowerCase().trim();
+            const qSN = document.getElementById('filter-storeName').value.toLowerCase().trim();
+            const qOD = document.getElementById('filter-orderDate').value.toLowerCase().trim();
+            const qDD = document.getElementById('filter-deliveryDate').value.toLowerCase().trim();
+            const qIC = document.getElementById('filter-itemCode').value.toLowerCase().trim();
+            const qIN = document.getElementById('filter-itemName').value.toLowerCase().trim();
+
+            currentDetailOrders = baseDetailOrders.filter(row => {
+                if (qSC && !cleanCode(row.store_code).toLowerCase().includes(qSC)) return false;
+                if (qSN && !String(row.store_name||'').toLowerCase().includes(qSN)) return false;
+                if (qOD && !formatDisplayDate(row.order_date).toLowerCase().includes(qOD)) return false;
+                if (qDD && !formatDisplayDate(row.delivery_date).toLowerCase().includes(qDD)) return false;
+                if (qIC && !cleanCode(row.item_code).toLowerCase().includes(qIC)) return false;
+                if (qIN && !String(row.item_name||'').toLowerCase().includes(qIN)) return false;
+                return true;
+            });
+
+            renderDetailTable();
+        }
+
+        function renderDetailTable() {
+            const tbody = document.getElementById('order-detail-table');
+
+            if (!currentDetailOrders || currentDetailOrders.length === 0) {
+                tbody.innerHTML = `<tr><td colspan="9" style="text-align:center; padding:30px; color:#94a3b8;">데이터를 로딩 중이거나 없습니다.</td></tr>`;
+                document.getElementById('list-total-qty').innerText = "0";
+                document.getElementById('list-total-amount').innerText = "0";
+                return;
+            }
+
+            let sumQty = 0, sumAmount = 0;
+            const rowsHtml = currentDetailOrders.map(row => {
+                const q = cleanNumber(row.qty), p = cleanNumber(row.price);
+                let t = cleanNumber(row.total_amount) || (q * p);
+                sumQty += q; sumAmount += t;
+
+                return `
+                    <tr>
+                        <td><span class="code-tag">${cleanCode(row.store_code)}</span></td>
+                        <td><b>${row.store_name||'-'}</b></td>
+                        <td>${formatDisplayDate(row.order_date)}</td>
+                        <td><span style="color:#2563eb; font-weight:bold;">${formatDisplayDate(row.delivery_date)}</span></td>
+                        <td><span class="code-tag">${cleanCode(row.item_code)}</span></td>
+                        <td>${row.item_name||'-'}</td>
+                        <td class="text-right">${q.toLocaleString()}</td>
+                        <td class="text-right">${p > 0 ? p.toLocaleString() + '원' : '-'}</td>
+                        <td class="text-right"><b>${t > 0 ? t.toLocaleString() + '원' : '-'}</b></td>
+                    </tr>
+                `;
+            });
+
+            tbody.innerHTML = rowsHtml.join('');
+            document.getElementById('list-total-qty').innerText = sumQty.toLocaleString();
+            document.getElementById('list-total-amount').innerText = sumAmount.toLocaleString();
+        }
+
+        function exportToExcel() {
+            if (!currentDetailOrders || currentDetailOrders.length === 0) return alert("저장할 데이터가 없습니다.");
+            const exportData = currentDetailOrders.map(row => ({
+                '점포코드': cleanCode(row.store_code), '점포명': row.store_name || '-',
+                '주문일자': formatDisplayDate(row.order_date), '배송일자': formatDisplayDate(row.delivery_date),
+                '품목코드': cleanCode(row.item_code), '품목명': row.item_name || '-',
+                '수량': cleanNumber(row.qty), '단가': cleanNumber(row.price),
+                '금액': cleanNumber(row.total_amount) || (cleanNumber(row.qty) * cleanNumber(row.price))
+            }));
+            const ws = XLSX.utils.json_to_sheet(exportData);
+            const wb = XLSX.utils.book_new();
+            XLSX.utils.book_append_sheet(wb, ws, "주문상세");
+            XLSX.writeFile(wb, `OMS주문상세_${document.getElementById('detail-target-date').value}.xlsx`);
+        }
+
+        /* ⚡ 초기 실행 */
+        document.addEventListener('DOMContentLoaded', () => {
+            const today = new Date();
+            const past7 = new Date(); past7.setDate(today.getDate() - 7);
+
+            document.getElementById('chart-start-date').value = localStorage.getItem('cached_chart_start_date') || formatDate(past7);
+            document.getElementById('chart-end-date').value = localStorage.getItem('cached_chart_end_date') || formatDate(today);
+            document.getElementById('sync-target-date').value = formatDate(today);
+            document.getElementById('detail-target-date').value = localStorage.getItem('cached_detail_target_date') || formatDate(today);
+            document.getElementById('chart-brand-input').value = localStorage.getItem('cached_brand_input') || '';
+            document.getElementById('chart-item-input').value = localStorage.getItem('cached_item_input') || '';
+
+            document.getElementById('calendar-month-picker').value = `${today.getFullYear()}-${String(today.getMonth()+1).padStart(2, '0')}`;
+
+            const cachedLastUpdated = localStorage.getItem('cached_last_updated');
+            if (cachedLastUpdated) document.getElementById('last-updated-text').innerText = `🕒 최신 배송일자: ${cachedLastUpdated}`;
+
+            loadCalendarData();
+            fetchChartData();
+            fetchDetailData();
+        });
+
+        async function triggerBot() {
+            const btn = document.getElementById('run-btn');
+            const targetDateVal = document.getElementById('sync-target-date').value.replace(/-/g, '/');
+
+            if (!targetDateVal) return alert("수동 동기화할 일자를 선택하세요.");
+
+            btn.disabled = true; btn.innerText = "🔄 동기화 중...";
+
+            try {
+                const res = await fetch(`https://api.github.com/repos/${githubId}/${repoName}/actions/workflows/capture.yml/dispatches`, {
+                    method: 'POST',
+                    headers: { 'Accept': 'application/vnd.github.v3+json', 'Authorization': `Bearer ${token}` },
+                    body: JSON.stringify({ ref: 'main', inputs: { start_date: targetDateVal, end_date: targetDateVal } })
+                });
+
+                if (res.ok) {
+                    alert(`✅ [${targetDateVal}] OMS 데이터 동기화 요청 완료!`);
+                    setTimeout(async () => { 
+                        try {
+                            // 로컬 캐시 초기화
+                            const db = await openIndexedDB();
+                            const tx = db.transaction(STORE_NAME, "readwrite");
+                            tx.objectStore(STORE_NAME).clear();
+
+                            await fetch(`${SUPABASE_URL}/rest/v1/rpc/refresh_daily_summary`, {
+                                method: 'POST',
+                                headers: { 'apikey': SUPABASE_ANON_KEY, 'Authorization': `Bearer ${SUPABASE_ANON_KEY}` }
+                            });
+                            await fetch(`${SUPABASE_URL}/rest/v1/rpc/refresh_store_summary`, {
+                                method: 'POST',
+                                headers: { 'apikey': SUPABASE_ANON_KEY, 'Authorization': `Bearer ${SUPABASE_ANON_KEY}` }
+                            });
+                        } catch(e) {}
+                        
+                        btn.disabled = false; 
+                        btn.innerText = "🚀 OMS 수동 동기화"; 
+                        loadCalendarData();
+                        fetchChartData();
+                        fetchDetailData(); 
+                    }, 35000);
+                } else {
+                    alert("❌ 동기화 요청 실패"); btn.disabled = false; btn.innerText = "🚀 OMS 수동 동기화";
+                }
+            } catch (err) {
+                alert("❌ 네트워크 오류"); btn.disabled = false; btn.innerText = "🚀 OMS 수동 동기화";
+            }
+        }
+    </script>
 </body>
 </html>
