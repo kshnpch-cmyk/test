@@ -2,18 +2,59 @@
 <html lang="ko">
 <head>
   <meta charset="UTF-8">
-  <title>뉴스 브리핑 리포트</title>
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>티스토리 자동 포스팅 시스템</title>
   <style>
-    body { font-family: '맑은 고딕', sans-serif; padding: 20px; max-width: 800px; margin: 0 auto; line-height: 1.6; }
-    .tag-box { background: #f0f4f8; padding: 10px 15px; border-radius: 8px; margin-bottom: 20px; font-weight: bold; color: #2b6cb0; }
+    body { font-family: '맑은 고딕', sans-serif; padding: 20px; max-width: 900px; margin: 0 auto; line-height: 1.6; }
+    
+    /* 최상단 제어 영역 스티키 스타일 */
+    .control-panel {
+      position: sticky;
+      top: 0;
+      background-color: #ffffff;
+      padding: 15px 20px;
+      border-bottom: 2px solid #e2e8f0;
+      box-shadow: 0 4px 6px -1px rgba(0, 0, 0, 0.1);
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      z-index: 1000;
+      margin-bottom: 20px;
+    }
+    
+    .btn-action {
+      background-color: #ff5722;
+      color: white;
+      border: none;
+      padding: 12px 24px;
+      font-size: 16px;
+      font-weight: bold;
+      border-radius: 6px;
+      cursor: pointer;
+      transition: background-color 0.2s;
+    }
+    .btn-action:hover { background-color: #e64a19; }
+    .btn-action:disabled { background-color: #ccc; cursor: not-allowed; }
+
+    /* 상태 콘솔 창 */
+    .status-log { font-size: 14px; color: #4a5568; font-weight: bold; }
+    
+    /* 리포트 출력 영역 */
+    .tag-box { background: #edf2f7; padding: 10px 15px; border-radius: 8px; margin-bottom: 20px; font-weight: bold; color: #2b6cb0; }
     .news-title { font-size: 24px; font-weight: bold; color: #1a202c; border-bottom: 2px solid #e2e8f0; padding-bottom: 10px; }
     .news-body { margin-top: 20px; }
-    #loading { text-align: center; font-size: 18px; color: #666; padding: 50px; }
   </style>
 </head>
 <body>
 
-  <div id="loading">데이터를 불러오는 중입니다...</div>
+  <!-- 최상단 확인 버튼 제어 패널 -->
+  <div class="control-panel">
+    <div id="statusLog" class="status-log">상태: 데이터 로드 완료 (대기 중)</div>
+    <button id="startBtn" class="btn-action" onclick="startTistoryProcess()">🚀 티스토리 글쓰기 시작</button>
+  </div>
+
+  <!-- 데이터 표시 영역 -->
+  <div id="loading">구글 시트 데이터를 불러오는 중입니다...</div>
   
   <div id="content" style="display: none;">
     <div id="tags" class="tag-box"></div>
@@ -22,21 +63,26 @@
   </div>
 
   <script>
-    const GAS_URL = "https://script.google.com/macros/s/AKfycbw7m4QqfJEqIYQhOspioAiloF531AgU3VnsstOs46Lqyo7UTxkXCvKQc6c72Dn3Yr2U/exec";
+    const GAS_URL = "https://script.google.com/macros/s/AKfycbxTqkNEsNRFWkYV_zbwRaHow3R_ykZRLUge2IysUU-gCr1nJaQhUDw4QHd9CSJDDuY/exec";
+    
+    // 가져온 데이터를 저장할 전역 변수
+    let currentPostData = { title: "", html: "", tags: "" };
 
+    // 1. 구글 시트1 데이터 가져오기
     async function fetchData() {
       try {
         const response = await fetch(GAS_URL, { redirect: "follow" });
         const data = await response.json();
         
-        console.log("수신 데이터:", data);
-
         if (data.error) {
           document.getElementById('loading').innerText = "오류: " + data.error;
           return;
         }
 
-        // 받아온 데이터 화면에 바인딩
+        // 전역 변수에 데이터 저장
+        currentPostData = data;
+
+        // 화면 표출
         document.getElementById('title').innerText = data.title || "제목 없음";
         document.getElementById('tags').innerText = "🏷️ 태그: " + (data.tags || "태그 없음");
         document.getElementById('body').innerHTML = data.html || "본문 없음";
@@ -50,6 +96,28 @@
       }
     }
 
+    // 2. 최상단 [확인 / 글쓰기 시작] 버튼 클릭 이벤트
+    function startTistoryProcess() {
+      const btn = document.getElementById('startBtn');
+      const status = document.getElementById('statusLog');
+
+      if (!currentPostData.title) {
+        alert("아직 데이터를 불러오지 못했거나 내용이 없습니다.");
+        return;
+      }
+
+      // 버튼 비활성화 및 상태 업데이트
+      btn.disabled = true;
+      status.innerText = "상태: ⏳ 티스토리 자동 로그인 및 작성 시작...";
+
+      // TODO: 백엔드 자동화 서버(Node.js/Playwright) 또는 로컬 매크로 서버 호출
+      console.log("전송할 데이터:", currentPostData);
+      
+      // 다음 단계를 위해 시뮬레이션 알림 처리
+      alert("로그인 및 포스팅 프로세스를 요청합니다.");
+    }
+
+    // 페이지 로드 시 시트1 데이터 조회
     fetchData();
   </script>
 </body>
