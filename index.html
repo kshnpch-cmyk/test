@@ -3,7 +3,7 @@
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
-  <title>티스토리 자동 포스팅 시스템</title>
+  <title>자동 블로그 리포트 발행 시스템</title>
   <style>
     body { font-family: '맑은 고딕', sans-serif; padding: 20px; max-width: 900px; margin: 0 auto; line-height: 1.6; }
     
@@ -23,7 +23,7 @@
     }
     
     .btn-action {
-      background-color: #ff5722;
+      background-color: #2b6cb0;
       color: white;
       border: none;
       padding: 12px 24px;
@@ -33,7 +33,7 @@
       cursor: pointer;
       transition: background-color 0.2s;
     }
-    .btn-action:hover { background-color: #e64a19; }
+    .btn-action:hover { background-color: #2c5282; }
     .btn-action:disabled { background-color: #ccc; cursor: not-allowed; }
 
     /* 상태 콘솔 창 */
@@ -47,10 +47,10 @@
 </head>
 <body>
 
-  <!-- 최상단 확인 버튼 제어 패널 -->
+  <!-- 최상단 제어 패널 -->
   <div class="control-panel">
-    <div id="statusLog" class="status-log">상태: 데이터 로드 완료 (대기 중)</div>
-    <button id="startBtn" class="btn-action" onclick="startTistoryProcess()">🚀 티스토리 글쓰기 시작</button>
+    <div id="statusLog" class="status-log">상태: 시트 데이터 조회 완료 (발행 대기 중)</div>
+    <button id="startBtn" class="btn-action" onclick="triggerGithubActions()">🚀 GitHub Pages에 포스팅 발행하기</button>
   </div>
 
   <!-- 데이터 표시 영역 -->
@@ -63,12 +63,12 @@
   </div>
 
   <script>
-    const GAS_URL = "https://script.google.com/macros/s/AKfycbxTqkNEsNRFWkYV_zbwRaHow3R_ykZRLUge2IysUU-gCr1nJaQhUDw4QHd9CSJDDuY/exec";
+    // 최신으로 업데이트된 GAS URL
+    const GAS_URL = "https://script.google.com/macros/s/AKfycbw7m4QqfJEqIYQhOspioAiloF531AgU3VnsstOs46Lqyo7UTxkXCvKQc6c72Dn3Yr2U/exec";
     
-    // 가져온 데이터를 저장할 전역 변수
     let currentPostData = { title: "", html: "", tags: "" };
 
-    // 1. 구글 시트1 데이터 가져오기
+    // 1. 구글 시트 데이터 가져오기
     async function fetchData() {
       try {
         const response = await fetch(GAS_URL, { redirect: "follow" });
@@ -79,10 +79,8 @@
           return;
         }
 
-        // 전역 변수에 데이터 저장
         currentPostData = data;
 
-        // 화면 표출
         document.getElementById('title').innerText = data.title || "제목 없음";
         document.getElementById('tags').innerText = "🏷️ 태그: " + (data.tags || "태그 없음");
         document.getElementById('body').innerHTML = data.html || "본문 없음";
@@ -96,28 +94,19 @@
       }
     }
 
-    // 2. 최상단 [확인 / 글쓰기 시작] 버튼 클릭 이벤트
-    function startTistoryProcess() {
-      const btn = document.getElementById('startBtn');
-      const status = document.getElementById('statusLog');
-
+    // 2. 버튼 클릭 시 Actions 배포 실행 가이드
+    function triggerGithubActions() {
       if (!currentPostData.title) {
         alert("아직 데이터를 불러오지 못했거나 내용이 없습니다.");
         return;
       }
 
-      // 버튼 비활성화 및 상태 업데이트
-      btn.disabled = true;
-      status.innerText = "상태: ⏳ 티스토리 자동 로그인 및 작성 시작...";
-
-      // TODO: 백엔드 자동화 서버(Node.js/Playwright) 또는 로컬 매크로 서버 호출
-      console.log("전송할 데이터:", currentPostData);
+      alert("GitHub Actions 페이지로 이동합니다. [Run workflow] 버튼을 눌러 이 글을 즉시 블로그 포스팅으로 발행하세요!");
       
-      // 다음 단계를 위해 시뮬레이션 알림 처리
-      alert("로그인 및 포스팅 프로세스를 요청합니다.");
+      // GitHub Actions 실행 페이지 주소로 자동 이동
+      window.open("https://github.com/kshnpch-cmyk/test/actions/workflows/deploy_blog.yml", "_blank");
     }
 
-    // 페이지 로드 시 시트1 데이터 조회
     fetchData();
   </script>
 </body>
