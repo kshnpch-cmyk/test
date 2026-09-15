@@ -1,7 +1,6 @@
 name: Tistory Auto Login Test
 
 on:
-  # 웹사이트(index.html) 버튼 클릭 또는 수동 실행 이벤트
   workflow_dispatch:
 
 jobs:
@@ -28,3 +27,11 @@ jobs:
         KAKAO_ID: ${{ secrets.KAKAO_ID }}
         KAKAO_PW: ${{ secrets.KAKAO_PW }}
       run: node tistory_login.js
+
+    # 실패하거나 성공했을 때 캡처 이미지를 Artifact로 업로드하는 단계 (always() 조건)
+    - name: 오류 화면 캡처 이미지 업로드
+      if: always()
+      uses: actions/upload-artifact@v4
+      with:
+        name: error-screenshot
+        path: error_screenshot.png
