@@ -2,73 +2,54 @@
 <html lang="ko">
 <head>
   <meta charset="UTF-8">
-  <meta name="viewport" content="width=device-width, initial-scale=1.0">
-  <title>Google Sheet Data Connection</title>
+  <title>뉴스 브리핑 리포트</title>
   <style>
-    body { font-family: sans-serif; padding: 20px; }
-    table { border-collapse: collapse; width: 100%; margin-top: 15px; }
-    th, td { border: 1px solid #ddd; padding: 8px; text-align: left; }
-    th { background-color: #f2f2f2; }
-    #loading { font-weight: bold; color: #555; }
+    body { font-family: '맑은 고딕', sans-serif; padding: 20px; max-width: 800px; margin: 0 auto; line-height: 1.6; }
+    .tag-box { background: #f0f4f8; padding: 10px 15px; border-radius: 8px; margin-bottom: 20px; font-weight: bold; color: #2b6cb0; }
+    .news-title { font-size: 24px; font-weight: bold; color: #1a202c; border-bottom: 2px solid #e2e8f0; padding-bottom: 10px; }
+    .news-body { margin-top: 20px; }
+    #loading { text-align: center; font-size: 18px; color: #666; padding: 50px; }
   </style>
 </head>
 <body>
 
-  <h1>구글 시트 연동 데이터1</h1>
   <div id="loading">데이터를 불러오는 중입니다...</div>
-  <div id="data-table"></div>
+  
+  <div id="content" style="display: none;">
+    <div id="tags" class="tag-box"></div>
+    <h1 id="title" class="news-title"></h1>
+    <div id="body" class="news-body"></div>
+  </div>
 
   <script>
-    // 제공해주신 Google Apps Script 웹 앱 URL
     const GAS_URL = "https://script.google.com/macros/s/AKfycbwkXeyBuPaCPrdpRM5QjJlnqlUVGrRBv5V78S9r9jZn1k3bhGWSo3jI8TMDGckTClME/exec";
 
-    // 데이터 불러오기 함수
     async function fetchData() {
       try {
-        const response = await fetch(GAS_URL);
+        const response = await fetch(GAS_URL, { redirect: "follow" });
         const data = await response.json();
         
+        console.log("수신 데이터:", data);
+
+        if (data.error) {
+          document.getElementById('loading').innerText = "오류: " + data.error;
+          return;
+        }
+
+        // 받아온 데이터 화면에 바인딩
+        document.getElementById('title').innerText = data.title || "제목 없음";
+        document.getElementById('tags').innerText = "🏷️ 태그: " + (data.tags || "태그 없음");
+        document.getElementById('body').innerHTML = data.html || "본문 없음";
+
         document.getElementById('loading').style.display = 'none';
-        renderTable(data);
+        document.getElementById('content').style.display = 'block';
+
       } catch (error) {
         console.error("데이터 불러오기 실패:", error);
         document.getElementById('loading').innerText = "데이터를 불러오는 중 오류가 발생했습니다.";
       }
     }
 
-    // JSON 데이터를 테이블로 화면에 표시하는 함수
-    function renderTable(data) {
-      const container = document.getElementById('data-table');
-      
-      // 데이터가 배포된 GAS 형태에 따라 조절이 필요할 수 있습니다 (배열 형태 가정)
-      if (!Array.isArray(data) || data.length === 0) {
-        container.innerHTML = "<p>표시할 데이터가 없습니다.</p>";
-        return;
-      }
-
-      let html = '<table>';
-      
-      // 1. 헤더 (첫 번째 행 데이터의 key 또는 첫번째 배열)
-      html += '<tr>';
-      if (typeof data[0] === 'object') {
-        Object.keys(data[0]).forEach(key => html += `<th>${key}</th>`);
-      }
-      html += '</tr>';
-
-      // 2. 바디 (내용)
-      data.forEach(row => {
-        html += '<tr>';
-        if (typeof row === 'object') {
-          Object.values(row).forEach(val => html += `<td>${val}</td>`);
-        }
-        html += '</tr>';
-      });
-
-      html += '</table>';
-      container.innerHTML = html;
-    }
-
-    // 페이지 로드 시 실행
     fetchData();
   </script>
 </body>
