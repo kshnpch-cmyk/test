@@ -7,7 +7,6 @@
   <style>
     body { font-family: '맑은 고딕', sans-serif; padding: 20px; max-width: 900px; margin: 0 auto; line-height: 1.6; }
     
-    /* 최상단 제어 영역 스티키 스타일 */
     .control-panel {
       position: sticky;
       top: 0;
@@ -36,10 +35,7 @@
     .btn-action:hover { background-color: #2c5282; }
     .btn-action:disabled { background-color: #ccc; cursor: not-allowed; }
 
-    /* 상태 콘솔 창 */
     .status-log { font-size: 14px; color: #4a5568; font-weight: bold; }
-    
-    /* 리포트 출력 영역 */
     .tag-box { background: #edf2f7; padding: 10px 15px; border-radius: 8px; margin-bottom: 20px; font-weight: bold; color: #2b6cb0; }
     .news-title { font-size: 24px; font-weight: bold; color: #1a202c; border-bottom: 2px solid #e2e8f0; padding-bottom: 10px; }
     .news-body { margin-top: 20px; }
@@ -47,13 +43,11 @@
 </head>
 <body>
 
-  <!-- 최상단 제어 패널 -->
   <div class="control-panel">
-    <div id="statusLog" class="status-log">상태: 시트 데이터 조회 완료 (발행 대기 중)</div>
+    <div id="statusLog" class="status-log">상태: 데이터 불러오는 중...</div>
     <button id="startBtn" class="btn-action" onclick="triggerGithubActions()">🚀 GitHub Pages에 포스팅 발행하기</button>
   </div>
 
-  <!-- 데이터 표시 영역 -->
   <div id="loading">구글 시트 데이터를 불러오는 중입니다...</div>
   
   <div id="content" style="display: none;">
@@ -63,51 +57,46 @@
   </div>
 
   <script>
-    // 최신으로 업데이트된 GAS URL
-    const GAS_URL = "https://script.google.com/macros/s/AKfycbw7m4QqfJEqIYQhOspioAiloF531AgU3VnsstOs46Lqyo7UTxkXCvKQc6c72Dn3Yr2U/exec";
-    
+    // 최신 GAS URL 적용
+    const GAS_URL = "https://script.google.com/macros/s/AKfycbwckeP9gPrztQnP1h9m3qHCnkactVAUhfPYcoa1wu6PHSnxTKgAL8FDwSaRRYR5gBXO/exec";
     let currentPostData = { title: "", html: "", tags: "" };
 
-    // 1. 구글 시트 데이터 가져오기
-    async function fetchData() {
-      try {
-        const response = await fetch(GAS_URL, { redirect: "follow" });
-        const data = await response.json();
-        
-        if (data.error) {
-          document.getElementById('loading').innerText = "오류: " + data.error;
-          return;
-        }
-
-        currentPostData = data;
-
-        document.getElementById('title').innerText = data.title || "제목 없음";
-        document.getElementById('tags').innerText = "🏷️ 태그: " + (data.tags || "태그 없음");
-        document.getElementById('body').innerHTML = data.html || "본문 없음";
-
-        document.getElementById('loading').style.display = 'none';
-        document.getElementById('content').style.display = 'block';
-
-      } catch (error) {
-        console.error("데이터 불러오기 실패:", error);
-        document.getElementById('loading').innerText = "데이터를 불러오는 중 오류가 발생했습니다.";
+    function handleGASResponse(data) {
+      if (!data || data.error) {
+        document.getElementById('loading').innerText = "오류: " + (data ? data.error : "데이터가 없습니다.");
+        return;
       }
+
+      currentPostData = data;
+
+      document.getElementById('title').innerText = data.title || "제목 없음";
+      document.getElementById('tags').innerText = "🏷️ 태그: " + (data.tags || "태그 없음");
+      document.getElementById('body').innerHTML = data.html || "본문 없음";
+
+      document.getElementById('loading').style.display = 'none';
+      document.getElementById('content').style.display = 'block';
+      document.getElementById('statusLog').innerText = "상태: 데이터 로드 완료 (발행 대기 중)";
     }
 
-    // 2. 버튼 클릭 시 Actions 배포 실행 가이드
+    function loadDataJSONP() {
+      const script = document.createElement('script');
+      script.src = `${GAS_URL}?callback=handleGASResponse`;
+      script.onerror = function() {
+        document.getElementById('loading').innerText = "데이터를 불러오는 중 오류가 발생했습니다.";
+      };
+      document.body.appendChild(script);
+    }
+
     function triggerGithubActions() {
       if (!currentPostData.title) {
         alert("아직 데이터를 불러오지 못했거나 내용이 없습니다.");
         return;
       }
-
-      alert("GitHub Actions 페이지로 이동합니다. [Run workflow] 버튼을 눌러 이 글을 즉시 블로그 포스팅으로 발행하세요!");
-      
-      // GitHub Actions 실행 페이지 주소로 자동 이동
+      alert("GitHub Actions 페이지로 이동합니다. [Run workflow] 버튼을 눌러 발행을 완료하세요!");
       window.open("https://github.com/kshnpch-cmyk/test/actions/workflows/deploy_blog.yml", "_blank");
     }
 
-    fetchData();
+    loadDataJSONP();
   </script>
 </body>
 </html>
