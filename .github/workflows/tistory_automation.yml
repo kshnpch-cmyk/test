@@ -1,0 +1,30 @@
+name: Tistory Auto Login Test
+
+on:
+  # 웹사이트(index.html) 버튼 클릭 또는 수동 실행 이벤트
+  workflow_dispatch:
+
+jobs:
+  run-automation:
+    runs-on: ubuntu-latest
+
+    steps:
+    - name: 코체크아웃
+      uses: actions/checkout@v3
+
+    - name: Node.js 설치
+      uses: actions/setup-node@v3
+      with:
+        node-version: 18
+
+    - name: 의존성 패키지 및 크로미늄 설치
+      run: |
+        npm init -y
+        npm install playwright
+        npx playwright install chromium --with-deps
+
+    - name: 크로미늄 자동 로그인 실행
+      env:
+        KAKAO_ID: ${{ secrets.KAKAO_ID }}
+        KAKAO_PW: ${{ secrets.KAKAO_PW }}
+      run: node tistory_login.js
