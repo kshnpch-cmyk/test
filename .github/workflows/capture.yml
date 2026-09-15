@@ -1,45 +1,57 @@
-name: Auto Capture Bot
+name: OMS Order Capture Bot
 
 on:
   workflow_dispatch:
     inputs:
       start_date:
-        description: '시작일'
-        required: false
+        description: '시작 일자 (YYYY/MM/DD)'
+        required: true
+        default: ''
       end_date:
-        description: '종료일'
-        required: false
+        description: '종료 일자 (YYYY/MM/DD)'
+        required: true
+        default: ''
+  schedule:
+    # 매일 정해진 시간에 자동 실행 (필요 시 Cron 주기 설정)
+    - cron: '0 21 * * *'
 
 jobs:
-  build:
+  capture:
     runs-on: ubuntu-latest
 
     steps:
-      - uses: actions/checkout@v4
+      - name: 저장소 체크아웃
+        uses: actions/checkout@v3
 
-      - name: 파이썬 설정
-        uses: actions/setup-python@v5
+      - name: 파이썬 환경 설정
+        uses: actions/setup-python@v4
         with:
           python-version: '3.10'
 
-      - name: 필수 라이브러리 설치
-        run: pip install selenium beautifulsoup4 requests
-
-      - name: 한글 폰트 설치
+      - name: 의존성 패키지 설치
         run: |
-          sudo apt-get update
-          sudo apt-get install -y fonts-nanum
+          python -m pip install --upgrade pip
+          if [ -f requirements.txt ]; then pip install -r requirements.txt; fi
+          playwright install chromium
 
-      - name: 캡처 및 데이터 전송 실행
+      - name: OMS 데이터 수집 및 Supabase 저장 실행
         env:
           START_DATE: ${{ github.event.inputs.start_date }}
           END_DATE: ${{ github.event.inputs.end_date }}
-        run: python screenshot.py
-
-      - name: GitHub에 캡처 이미지 덮어쓰기
+          SUPABASE_URL: "https://zbilhsgfgyfrolveaego.supabase.co"
+          SUPABASE_ANON_KEY: "sb_publishable_OWW3nk7m7Vy3Ex0205ypgg_IG3xdBjN"
         run: |
-          git config --global user.name "GitHub Actions Bot"
-          git config --global user.email "actions@github.com"
-          git add capture.png
-          git commit -m "Auto update capture image" || echo "No changes to commit"
-          git push
+          python capture.py
+
+      # 🚀 [추가된 핵심 스텝] 수집 완료 즉시 Supabase 캐시 뷰 갱신 명령 전송
+      - name: Supabase 구체화 뷰(MATERIALIZED VIEW) 자동 갱신
+        run: |
+          curl -X POST "https://zbilhsgfgyfrolveaego.supabase.co/rest/v1/rpc/refresh_daily_summary" \
+            -H "apikey: sb_publishable_OWW3nk7m7Vy3Ex0205ypgg_IG3xdBjN" \
+            -H "Authorization: Bearer sb_publishable_OWW3nk7m7Vy3Ex0205ypgg_IG3xdBjN"
+          
+          curl -X POST "https://zbilhsgfgyfrolveaego.supabase.co/rest/v1/rpc/refresh_store_summary" \
+            -H "apikey: sb_publishable_OWW3nk7m7Vy3Ex0205ypgg_IG3xdBjN" \
+            -H "Authorization: Bearer sb_publishable_OWW3nk7m7Vy3Ex0205ypgg_IG3xdBjN"
+          
+          echo "✅ Supabase 구체화 뷰 리프레시 요청이 성공적으로 완료되었습니다."
