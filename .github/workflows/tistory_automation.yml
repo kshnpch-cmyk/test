@@ -9,20 +9,21 @@ jobs:
 
     steps:
     - name: 코드 체크아웃
-      uses: actions/checkout@v3
+      uses: actions/checkout@v4
 
-    - name: Node.js 설치
-      uses: actions/setup-node@v3
+    - name: Node.js 설정 및 npm 캐시 활성화
+      uses: actions/setup-node@v4
       with:
-        node-version: 18
+        node-version: 20
+        cache: 'npm'
 
+    # 1. npm 패키지 빠르게 설치 (package-lock.json 기반)
     - name: 의존성 패키지 설치
-      run: |
-        npm init -y
-        npm install playwright
+      run: npm ci || npm install
 
-    - name: Playwright 크로미늄 캐시 확인
-      uses: actions/cache@v3
+    # 2. Playwright 크로미늄 캐싱 설정
+    - name: Playwright 크로미늄 캐시 설정
+      uses: actions/cache@v4
       id: playwright-cache
       with:
         path: ~/.cache/ms-playwright
@@ -30,11 +31,13 @@ jobs:
         restore-keys: |
           ${{ runner.os }}-playwright-
 
-    - name: 크로미늄 및 시스템 라이브러리 설치
+    # 3. 캐시가 없을 때만 크로미늄 다운로드
+    - name: 크로미늄 브라우저 설치
       if: steps.playwright-cache.outputs.cache-hit != 'true'
       run: npx playwright install chromium --with-deps
 
-    - name: 크로미늄 실행 라이브러리 보장
+    # 4. 캐시 성공 시 필수 실행 환경만 복구
+    - name: 필수 라이브러리 복구
       if: steps.playwright-cache.outputs.cache-hit == 'true'
       run: npx playwright install-deps chromium
 
@@ -44,16 +47,14 @@ jobs:
         KAKAO_PW: ${{ secrets.KAKAO_PW }}
       run: node tistory_login.js
 
-    # 압축(zip) 파일 방식 대신 GitHub 저장소에 .png 이미지 파일 직접 커밋 및 push
     - name: 캡처된 PNG 파일 저장소에 직접 저장
       if: always()
       run: |
         git config --global user.name "github-actions[bot]"
         git config --global user.email "github-actions[bot]@users.noreply.github.com"
         
-        # error_screenshot.png 파일이 존재할 때만 저장소에 커밋
         if [ -f error_screenshot.png ]; then
           git add error_screenshot.png
-          git commit -m "📸 [Auto Log] 캡처 이미지 업데이트 (error_screenshot.png)" || exit 0
+          git commit -m "📸 캡처 이미지 업데이트" || exit 0
           git push
         fi
