@@ -1,11 +1,16 @@
 name: Tistory Auto Login Test
 
 on:
+  # 웹사이트 버튼 클릭 이벤트 또는 Actions 탭에서 수동 실행
   workflow_dispatch:
 
 jobs:
   run-automation:
     runs-on: ubuntu-latest
+
+    # 저장소에 캡처 이미지(PNG)를 커밋/푸시할 수 있는 쓰기 권한 부여
+    permissions:
+      contents: write
 
     steps:
     - name: 코드 체크아웃
@@ -17,17 +22,17 @@ jobs:
         node-version: 20
         cache: 'npm'
 
-    # 1. npm 패키지 빠르게 설치 (package-lock.json 기반)
+    # 1. package.json 기반 의존성 설치
     - name: 의존성 패키지 설치
-      run: npm ci || npm install
+      run: npm install
 
-    # 2. Playwright 크로미늄 캐싱 설정
-    - name: Playwright 크로미늄 캐시 설정
+    # 2. Playwright 크로미늄 브라우저 캐싱 설정
+    - name: Playwright 크로미늄 캐시 확인
       uses: actions/cache@v4
       id: playwright-cache
       with:
         path: ~/.cache/ms-playwright
-        key: ${{ runner.os }}-playwright-${{ hashFiles('**/package-lock.json') }}
+        key: ${{ runner.os }}-playwright-${{ hashFiles('**/package.json') }}
         restore-keys: |
           ${{ runner.os }}-playwright-
 
@@ -36,17 +41,19 @@ jobs:
       if: steps.playwright-cache.outputs.cache-hit != 'true'
       run: npx playwright install chromium --with-deps
 
-    # 4. 캐시 성공 시 필수 실행 환경만 복구
-    - name: 필수 라이브러리 복구
+    # 4. 캐시 히트 시에도 시스템 필수 라이브러리 보장
+    - name: 크로미늄 필수 실행 라이브러리 보장
       if: steps.playwright-cache.outputs.cache-hit == 'true'
       run: npx playwright install-deps chromium
 
+    # 5. 티스토리 로그인 자동화 실행 (Secrets 정보 전달)
     - name: 크로미늄 자동 로그인 실행
       env:
         KAKAO_ID: ${{ secrets.KAKAO_ID }}
         KAKAO_PW: ${{ secrets.KAKAO_PW }}
       run: node tistory_login.js
 
+    # 6. 오류 발생 시 error_screenshot.png 파일을 저장소 메인에 직접 커밋 및 푸시
     - name: 캡처된 PNG 파일 저장소에 직접 저장
       if: always()
       run: |
@@ -55,6 +62,6 @@ jobs:
         
         if [ -f error_screenshot.png ]; then
           git add error_screenshot.png
-          git commit -m "📸 캡처 이미지 업데이트" || exit 0
+          git commit -m "📸 [Auto Log] 오류 화면 캡처 업데이트 (error_screenshot.png)" || exit 0
           git push
         fi
