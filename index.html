@@ -2,47 +2,74 @@
 <html lang="ko">
 <head>
   <meta charset="UTF-8">
-  <title>Google Sheet Data</title>
-  <!-- CSV 파싱을 위한 PapaParse 라이브러리 -->
-  <script src="https://cdnjs.cloudflare.com/ajax/libs/PapaParse/5.3.2/papaparse.min.js"></script>
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Google Sheet Data Connection</title>
+  <style>
+    body { font-family: sans-serif; padding: 20px; }
+    table { border-collapse: collapse; width: 100%; margin-top: 15px; }
+    th, td { border: 1px solid #ddd; padding: 8px; text-align: left; }
+    th { background-color: #f2f2f2; }
+    #loading { font-weight: bold; color: #555; }
+  </style>
 </head>
 <body>
-  <h1>스프레드시트 데이터 연동</h1>
-  <div id="data-container"></div>
+
+  <h1>구글 시트 연동 데이터</h1>
+  <div id="loading">데이터를 불러오는 중입니다...</div>
+  <div id="data-table"></div>
 
   <script>
-    // Step 1에서 복사한 게시된 CSV URL을 넣으세요
-    const SHEET_CSV_URL = "여기에_게시된_CSV_URL을_입력하세요";
+    // 제공해주신 Google Apps Script 웹 앱 URL
+    const GAS_URL = "https://script.google.com/macros/s/AKfycbxTqkNEsNRFWkYV_zbwRaHow3R_ykZRLUge2IysUU-gCr1nJaQhUDw4QHd9CSJDDuY/exec";
 
-    Papa.parse(SHEET_CSV_URL, {
-      download: true,
-      header: true, // 첫 번째 행을 데이터 키(헤더)로 사용
-      complete: function(results) {
-        console.log("변환된 데이터:", results.data);
-        displayData(results.data);
+    // 데이터 불러오기 함수
+    async function fetchData() {
+      try {
+        const response = await fetch(GAS_URL);
+        const data = await response.json();
+        
+        document.getElementById('loading').style.display = 'none';
+        renderTable(data);
+      } catch (error) {
+        console.error("데이터 불러오기 실패:", error);
+        document.getElementById('loading').innerText = "데이터를 불러오는 중 오류가 발생했습니다.";
       }
-    });
+    }
 
-    function displayData(data) {
-      const container = document.getElementById('data-container');
-      let html = '<table border="1">';
+    // JSON 데이터를 테이블로 화면에 표시하는 함수
+    function renderTable(data) {
+      const container = document.getElementById('data-table');
       
-      if (data.length > 0) {
-        // 테이블 헤더 생성
-        html += '<tr>';
-        Object.keys(data[0]).forEach(key => html += `<th>${key}</th>`);
-        html += '</tr>';
-
-        // 테이블 행 데이터 생성
-        data.forEach(row => {
-          html += '<tr>';
-          Object.values(row).forEach(val => html += `<td>${val}</td>`);
-          html += '</tr>';
-        });
+      // 데이터가 배포된 GAS 형태에 따라 조절이 필요할 수 있습니다 (배열 형태 가정)
+      if (!Array.isArray(data) || data.length === 0) {
+        container.innerHTML = "<p>표시할 데이터가 없습니다.</p>";
+        return;
       }
+
+      let html = '<table>';
+      
+      // 1. 헤더 (첫 번째 행 데이터의 key 또는 첫번째 배열)
+      html += '<tr>';
+      if (typeof data[0] === 'object') {
+        Object.keys(data[0]).forEach(key => html += `<th>${key}</th>`);
+      }
+      html += '</tr>';
+
+      // 2. 바디 (내용)
+      data.forEach(row => {
+        html += '<tr>';
+        if (typeof row === 'object') {
+          Object.values(row).forEach(val => html += `<td>${val}</td>`);
+        }
+        html += '</tr>';
+      });
+
       html += '</table>';
       container.innerHTML = html;
     }
+
+    // 페이지 로드 시 실행
+    fetchData();
   </script>
 </body>
 </html>
