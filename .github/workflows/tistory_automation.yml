@@ -8,7 +8,7 @@ jobs:
     runs-on: ubuntu-latest
 
     steps:
-    - name: 코체크아웃
+    - name: 코드 체크아웃
       uses: actions/checkout@v3
 
     - name: Node.js 설치
@@ -16,11 +16,31 @@ jobs:
       with:
         node-version: 18
 
-    - name: 의존성 패키지 및 크로미늄 설치
+    # 1. npm 패키지 설치
+    - name: 의존성 패키지 설치
       run: |
         npm init -y
         npm install playwright
-        npx playwright install chromium --with-deps
+
+    # 2. 크로미늄 브라우저 캐싱 설정 (핵심)
+    - name: Playwright 크로미늄 캐시 확인
+      uses: actions/cache@v3
+      id: playwright-cache
+      with:
+        path: ~/.cache/ms-playwright
+        key: ${{ runner.os }}-playwright-${{ hashFiles('**/package-lock.json') }}
+        restore-keys: |
+          ${{ runner.os }}-playwright-
+
+    # 3. 캐시가 없을 때만 크로미늄 설치 실행
+    - name: 크로미늄 및 시스템 라이브러리 설치
+      if: steps.playwright-cache.outputs.cache-hit != 'true'
+      run: npx playwright install chromium --with-deps
+
+    # 4. 시스템 필수 라이브러리 보장 (캐시 히트 시에도 의존성 유지)
+    - name: 크로미늄 실행 라이브러리 보장
+      if: steps.playwright-cache.outputs.cache-hit == 'true'
+      run: npx playwright install-deps chromium
 
     - name: 크로미늄 자동 로그인 실행
       env:
@@ -28,7 +48,6 @@ jobs:
         KAKAO_PW: ${{ secrets.KAKAO_PW }}
       run: node tistory_login.js
 
-    # 실패하거나 성공했을 때 캡처 이미지를 Artifact로 업로드하는 단계 (always() 조건)
     - name: 오류 화면 캡처 이미지 업로드
       if: always()
       uses: actions/upload-artifact@v4
