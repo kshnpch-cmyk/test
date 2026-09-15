@@ -1,0 +1,9 @@
+{
+  "name": "tistory-auto-post",
+  "version": "1.0.0",
+  "description": "Tistory Auto Login via Playwright",
+  "main": "tistory_login.js",
+  "dependencies": {
+    "playwright": "^1.40.0"
+  }
+}
