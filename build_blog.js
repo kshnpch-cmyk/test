@@ -1,17 +1,25 @@
 const fs = require('fs');
 const path = require('path');
 
-const GAS_URL = "https://script.google.com/macros/s/AKfycbxTqkNEsNRFWkYV_zbwRaHow3R_ykZRLUge2IysUU-gCr1nJaQhUDw4QHd9CSJDDuY/exec";
+// 새로 주신 구글 앱스 스크립트 URL
+const GAS_URL = "https://script.google.com/macros/s/AKfycbw7m4QqfJEqIYQhOspioAiloF531AgU3VnsstOs46Lqyo7UTxkXCvKQc6c72Dn3Yr2U/exec";
 
 async function build() {
   console.log("🚀 구글 시트 데이터 수신 중...");
   
   try {
-    const response = await fetch(GAS_URL);
-    const data = await response.json();
+    const response = await fetch(GAS_URL, { redirect: 'follow' });
+    const rawText = await response.text();
+
+    // 반환된 데이터가 HTML(오류 또는 접근 제한)인지 확인
+    if (rawText.trim().startsWith('<')) {
+      throw new Error(`구글 시트 웹앱이 JSON 대신 HTML을 반환했습니다.\nGAS 배포 권한이 '모든 사용자(Anyone)'로 되어있는지 확인해주세요.\n\n응답 내용: ${rawText.substring(0, 150)}`);
+    }
+
+    const data = JSON.parse(rawText);
 
     if (!data.title || !data.html) {
-      console.log("⚠️ 생성할 데이터가 없거나 유효하지 않습니다.");
+      console.log("⚠️ 시트에 생성할 데이터(title 또는 html)가 없습니다.");
       return;
     }
 
@@ -21,11 +29,11 @@ async function build() {
       fs.mkdirSync(postsDir);
     }
 
-    // 2. 파일명 생성 (특수문자 제거)
+    // 2. 파일명 생성 (타임스탬프 기반)
     const fileName = `post-${Date.now()}.html`;
     const filePath = path.join(postsDir, fileName);
 
-    // 3. 개별 포스팅 HTML 템플릿 생성
+    // 3. 개별 포스팅 HTML 생성
     const postHtml = `<!DOCTYPE html>
 <html lang="ko">
 <head>
@@ -55,7 +63,7 @@ async function build() {
     updateIndex(fileName, data.title, data.tags);
 
   } catch (error) {
-    console.error("❌ 빌드 실패:", error);
+    console.error("❌ 빌드 실패:", error.message);
     process.exit(1);
   }
 }
