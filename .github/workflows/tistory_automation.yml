@@ -53,7 +53,7 @@ jobs:
         KAKAO_PW: ${{ secrets.KAKAO_PW }}
       run: node tistory_login.js
 
-    # 6. 오류 발생 시 error_screenshot.png 파일을 저장소 메인에 직접 커밋 및 푸시
+   # 6. error_screenshot.png 파일이 존재하면 무조건 커밋하여 저장소에 push
     - name: 캡처된 PNG 파일 저장소에 직접 저장
       if: always()
       run: |
@@ -61,7 +61,7 @@ jobs:
         git config --global user.email "github-actions[bot]@users.noreply.github.com"
         
         if [ -f error_screenshot.png ]; then
-          git add error_screenshot.png
-          git commit -m "📸 [Auto Log] 오류 화면 캡처 업데이트 (error_screenshot.png)" || exit 0
+          git add -f error_screenshot.png
+          git commit -m "📸 [Auto Log] 캡처 이미지 업데이트 (error_screenshot.png)" || exit 0
           git push
         fi
