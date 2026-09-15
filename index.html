@@ -51,6 +51,7 @@
             border-radius: 6px; font-weight: 700; cursor: pointer; font-size: 13px;
         }
         .btn:hover { background-color: #1d4ed8; }
+        .btn:disabled { background-color: #94a3b8; cursor: not-allowed; }
         .btn-query { background-color: #0284c7; }
         .btn-cal { background-color: #0f766e; padding: 4px 8px; font-size: 11px; border-radius: 4px; }
         .btn-excel { background-color: #16a34a; padding: 5px 10px; font-size: 12px; }
@@ -148,6 +149,23 @@
         .table-filter-input { width: 100%; padding: 4px 6px; font-size: 11px; border: 1px solid #cbd5e1; border-radius: 4px; }
         .text-right { text-align: right; }
         .code-tag { font-size: 11px; color: #64748b; font-family: monospace; }
+
+        /* 📄 페이지네이션 스타일 */
+        .pagination-container {
+            display: flex; justify-content: space-between; align-items: center;
+            margin-top: 15px; padding-top: 12px; border-top: 1px solid #e2e8f0; flex-wrap: wrap; gap: 10px;
+        }
+        .pagination-controls { display: flex; align-items: center; gap: 6px; }
+        .page-btn {
+            background-color: #f8fafc; border: 1px solid #cbd5e1; color: #334155;
+            padding: 5px 10px; font-size: 12px; font-weight: bold; border-radius: 4px; cursor: pointer;
+        }
+        .page-btn.active { background-color: #2563eb; color: white; border-color: #2563eb; }
+        .page-btn:disabled { opacity: 0.4; cursor: not-allowed; }
+        .page-info { font-size: 13px; color: #64748b; font-weight: 600; }
+        .rows-per-page-selector {
+            display: flex; align-items: center; gap: 6px; font-size: 13px; font-weight: 600; color: #475569;
+        }
     </style>
 </head>
 <body>
@@ -155,7 +173,7 @@
     <div class="navbar">
         <div class="brand-title">
             <h1>📦 더본 OMS 주문 실시간 대시보드</h1>
-            <span class="version-tag">v9.0 Ultra Fast Engine</span>
+            <span class="version-tag">v11.0 Paginated Engine</span>
         </div>
         <div class="control-panel">
             <div class="last-updated-tag">
@@ -194,7 +212,8 @@
                 <span class="close-btn" onclick="closeBrandModal()">✕</span>
             </div>
             <div style="display: flex; gap: 8px; margin-bottom: 8px;">
-                <input type="text" id="modal-brand-search" class="input-box" style="flex:1;" placeholder="브랜드명 검색..." onkeyup="filterBrandModalList()">
+                <input type="text" id="modal-brand-search" class="input-box" style="flex:1;" placeholder="브랜드명 검색 (Enter)" onkeydown="if(event.key==='Enter') filterBrandModalList()">
+                <button class="btn btn-cal" style="background:#2563eb;" onclick="filterBrandModalList()">검색</button>
                 <button class="btn btn-cal" style="background:#475569;" onclick="toggleAllBrandCheck(true)">전체선택</button>
                 <button class="btn btn-cal" style="background:#64748b;" onclick="toggleAllBrandCheck(false)">해제</button>
             </div>
@@ -212,8 +231,9 @@
                 <span class="modal-title">📦 품목 검색 및 선택</span>
                 <span class="close-btn" onclick="closeItemModal()">✕</span>
             </div>
-            <div style="margin-bottom: 8px;">
-                <input type="text" id="modal-item-search" class="input-box" style="width:100%;" placeholder="품목코드 또는 품목명 검색..." onkeyup="filterItemModalList()">
+            <div style="display: flex; gap: 8px; margin-bottom: 8px;">
+                <input type="text" id="modal-item-search" class="input-box" style="flex:1;" placeholder="품목코드 또는 품목명 검색 (Enter)" onkeydown="if(event.key==='Enter') filterItemModalList()">
+                <button class="btn btn-cal" style="background:#2563eb;" onclick="filterItemModalList()">검색</button>
             </div>
             <div class="modal-body-scroll" id="item-modal-list"></div>
         </div>
@@ -283,7 +303,10 @@
                     <input type="text" id="detail-brand-input" class="input-box" style="flex:1;" placeholder="브랜드 선택..." readonly onclick="openBrandModal('detail')">
                     <button class="btn-search-icon" onclick="openBrandModal('detail')">🔍</button>
                 </div>
-                <input type="text" id="store-search-input" class="search-input" placeholder="🔍 점포명 검색..." onkeyup="debouncedFilterStoreList()">
+                <div style="display: flex; gap: 4px; margin-bottom: 12px;">
+                    <input type="text" id="store-search-input" class="search-input" style="margin-bottom:0;" placeholder="🔍 점포명 입력 후 Enter" onkeydown="if(event.key==='Enter') filterStoreList()">
+                    <button class="btn btn-query" onclick="filterStoreList()">검색</button>
+                </div>
                 <div id="brand-summary" style="margin-bottom: 10px; font-size: 12px; color: #64748b;">
                     점포수: <b id="brand-store-count">0</b>개 | 품목수: <b id="brand-item-count">0</b>종
                 </div>
@@ -314,17 +337,38 @@
                                 <th class="text-right">단가</th><th class="text-right">금액</th>
                             </tr>
                             <tr class="filter-row-table">
-                                <th><input type="text" id="filter-storeCode" class="table-filter-input" placeholder="검색" onkeyup="debouncedApplyColumnFilters()"></th>
-                                <th><input type="text" id="filter-storeName" class="table-filter-input" placeholder="검색" onkeyup="debouncedApplyColumnFilters()"></th>
-                                <th><input type="text" id="filter-orderDate" class="table-filter-input" placeholder="검색" onkeyup="debouncedApplyColumnFilters()"></th>
-                                <th><input type="text" id="filter-deliveryDate" class="table-filter-input" placeholder="검색" onkeyup="debouncedApplyColumnFilters()"></th>
-                                <th><input type="text" id="filter-itemCode" class="table-filter-input" placeholder="검색" onkeyup="debouncedApplyColumnFilters()"></th>
-                                <th><input type="text" id="filter-itemName" class="table-filter-input" placeholder="검색" onkeyup="debouncedApplyColumnFilters()"></th>
+                                <th><input type="text" id="filter-storeCode" class="table-filter-input" placeholder="Enter" onkeydown="if(event.key==='Enter') applyColumnFilters()"></th>
+                                <th><input type="text" id="filter-storeName" class="table-filter-input" placeholder="Enter" onkeydown="if(event.key==='Enter') applyColumnFilters()"></th>
+                                <th><input type="text" id="filter-orderDate" class="table-filter-input" placeholder="Enter" onkeydown="if(event.key==='Enter') applyColumnFilters()"></th>
+                                <th><input type="text" id="filter-deliveryDate" class="table-filter-input" placeholder="Enter" onkeydown="if(event.key==='Enter') applyColumnFilters()"></th>
+                                <th><input type="text" id="filter-itemCode" class="table-filter-input" placeholder="Enter" onkeydown="if(event.key==='Enter') applyColumnFilters()"></th>
+                                <th><input type="text" id="filter-itemName" class="table-filter-input" placeholder="Enter" onkeydown="if(event.key==='Enter') applyColumnFilters()"></th>
                                 <th></th><th></th><th></th>
                             </tr>
                         </thead>
                         <tbody id="order-detail-table"></tbody>
                     </table>
+                </div>
+
+                <!-- 📄 [페이지네이션 및 건수 선택 컨트롤 바] -->
+                <div class="pagination-container">
+                    <div class="rows-per-page-selector">
+                        <label>페이지당 보기:</label>
+                        <select id="rows-per-page" class="input-box" onchange="changeRowsPerPage()">
+                            <option value="10">10개씩</option>
+                            <option value="50">50개씩</option>
+                            <option value="100" selected>100개씩</option>
+                            <option value="1000">1000개씩</option>
+                        </select>
+                    </div>
+
+                    <div class="pagination-controls">
+                        <button class="page-btn" id="btn-first-page" onclick="goToPage(1)">« 처음</button>
+                        <button class="page-btn" id="btn-prev-page" onclick="goToPage(currentPage - 1)">‹ 이전</button>
+                        <span class="page-info" id="page-info-text">1 / 1 페이지</span>
+                        <button class="page-btn" id="btn-next-page" onclick="goToPage(currentPage + 1)">다음 ›</button>
+                        <button class="page-btn" id="btn-last-page" onclick="goToPage(totalPages)">끝 »</button>
+                    </div>
                 </div>
             </div>
         </div>
@@ -349,7 +393,12 @@
         let allBrandList = [], allItemList = [];
         let activeBrandTarget = 'chart';
 
-        /* 💾 [2번 IndexedDB 엔진] 브라우저 기기 메모리 초고속 캐시 */
+        /* 📄 페이지네이션 상태 변수 */
+        let currentPage = 1;
+        let rowsPerPage = 100;
+        let totalPages = 1;
+
+        /* 💾 IndexedDB 브라우저 캐시 Engine */
         const DB_NAME = "OmsLocalCacheDB";
         const STORE_NAME = "query_cache";
 
@@ -376,11 +425,9 @@
                     const req = store.get(url);
                     req.onsuccess = () => {
                         const res = req.result;
-                        if (res && (Date.now() - res.timestamp < 1000 * 60 * 15)) { // 15분간 로컬 캐시 유지
+                        if (res && (Date.now() - res.timestamp < 1000 * 60 * 15)) {
                             resolve(res.data);
-                        } else {
-                            resolve(null);
-                        }
+                        } else resolve(null);
                     };
                     req.onerror = () => resolve(null);
                 });
@@ -391,8 +438,7 @@
             try {
                 const db = await openIndexedDB();
                 const tx = db.transaction(STORE_NAME, "readwrite");
-                const store = tx.objectStore(STORE_NAME);
-                store.put({ url, data, timestamp: Date.now() });
+                tx.objectStore(STORE_NAME).put({ url, data, timestamp: Date.now() });
             } catch (e) {}
         }
 
@@ -429,17 +475,6 @@
                 throw err;
             }
         }
-
-        function debounce(func, delay = 150) {
-            let timeout;
-            return function(...args) {
-                clearTimeout(timeout);
-                timeout = setTimeout(() => func.apply(this, args), delay);
-            };
-        }
-
-        const debouncedApplyColumnFilters = debounce(applyColumnFilters, 150);
-        const debouncedFilterStoreList = debounce(filterStoreList, 150);
 
         function formatDate(d) {
             const y = d.getFullYear();
@@ -645,7 +680,7 @@
             }
         }
 
-        /* 📊 추이 차트 수신 (이중 캐시 적용) */
+        /* 📊 추이 차트 조회 */
         async function fetchChartData() {
             const startDate = document.getElementById('chart-start-date').value;
             const endDate = document.getElementById('chart-end-date').value;
@@ -732,7 +767,7 @@
             });
         }
 
-        /* 🛒 하루치 상세 내역 (이중 캐시 적용) */
+        /* 🛒 하루치 상세 내역 불러오기 */
         async function fetchDetailData() {
             const targetDate = document.getElementById('detail-target-date').value;
             if (!targetDate) return;
@@ -817,7 +852,7 @@
         }
 
         function filterStoreList() {
-            const query = document.getElementById('store-search-input').value.toLowerCase();
+            const query = document.getElementById('store-search-input').value.toLowerCase().trim();
             document.querySelectorAll('#store-list .store-item').forEach(item => {
                 item.style.display = item.innerText.toLowerCase().includes(query) ? 'flex' : 'none';
             });
@@ -837,6 +872,7 @@
             }
         }
 
+        /* ⚡ 테이블 필터 적용 함수 */
         function applyColumnFilters() {
             const qSC = document.getElementById('filter-storeCode').value.toLowerCase().trim();
             const qSN = document.getElementById('filter-storeName').value.toLowerCase().trim();
@@ -855,9 +891,11 @@
                 return true;
             });
 
+            currentPage = 1; // 필터 적용 시 1페이지로 이동
             renderDetailTable();
         }
 
+        /* 📄 [페이지네이션 렌더링 엔진] 사용자가 선택한 건수만큼 끊어서 화면 조율 */
         function renderDetailTable() {
             const tbody = document.getElementById('order-detail-table');
 
@@ -865,14 +903,33 @@
                 tbody.innerHTML = `<tr><td colspan="9" style="text-align:center; padding:30px; color:#94a3b8;">데이터를 로딩 중이거나 없습니다.</td></tr>`;
                 document.getElementById('list-total-qty').innerText = "0";
                 document.getElementById('list-total-amount').innerText = "0";
+                updatePaginationUI(0);
                 return;
             }
 
+            // 전체 합계 계산 (전체 검색 필터링 건 기준)
             let sumQty = 0, sumAmount = 0;
-            const rowsHtml = currentDetailOrders.map(row => {
+            currentDetailOrders.forEach(row => {
+                const q = cleanNumber(row.qty), p = cleanNumber(row.price);
+                sumQty += q;
+                sumAmount += (cleanNumber(row.total_amount) || (q * p));
+            });
+            document.getElementById('list-total-qty').innerText = sumQty.toLocaleString();
+            document.getElementById('list-total-amount').innerText = sumAmount.toLocaleString();
+
+            // 페이지 수 계산
+            const totalItems = currentDetailOrders.length;
+            totalPages = Math.ceil(totalItems / rowsPerPage) || 1;
+            if (currentPage > totalPages) currentPage = totalPages;
+            if (currentPage < 1) currentPage = 1;
+
+            // 현재 페이지의 데이터 슬라이싱 (성능 극대화 핵심)
+            const startIndex = (currentPage - 1) * rowsPerPage;
+            const pageData = currentDetailOrders.slice(startIndex, startIndex + rowsPerPage);
+
+            const rowsHtml = pageData.map(row => {
                 const q = cleanNumber(row.qty), p = cleanNumber(row.price);
                 let t = cleanNumber(row.total_amount) || (q * p);
-                sumQty += q; sumAmount += t;
 
                 return `
                     <tr>
@@ -890,8 +947,31 @@
             });
 
             tbody.innerHTML = rowsHtml.join('');
-            document.getElementById('list-total-qty').innerText = sumQty.toLocaleString();
-            document.getElementById('list-total-amount').innerText = sumAmount.toLocaleString();
+            updatePaginationUI(totalItems);
+        }
+
+        /* 📄 페이지네이션 컨트롤 UI 업데이트 */
+        function updatePaginationUI(totalItems) {
+            document.getElementById('page-info-text').innerText = `${currentPage} / ${totalPages} 페이지 (총 ${totalItems.toLocaleString()}건)`;
+            
+            document.getElementById('btn-first-page').disabled = (currentPage === 1);
+            document.getElementById('btn-prev-page').disabled = (currentPage === 1);
+            document.getElementById('btn-next-page').disabled = (currentPage === totalPages || totalPages === 0);
+            document.getElementById('btn-last-page').disabled = (currentPage === totalPages || totalPages === 0);
+        }
+
+        function goToPage(page) {
+            if (page < 1 || page > totalPages) return;
+            currentPage = page;
+            renderDetailTable();
+            // 테이블 최상단으로 스크롤 이동
+            document.querySelector('.table-container').scrollTop = 0;
+        }
+
+        function changeRowsPerPage() {
+            rowsPerPage = parseInt(document.getElementById('rows-per-page').value, 10);
+            currentPage = 1;
+            renderDetailTable();
         }
 
         function exportToExcel() {
@@ -947,13 +1027,11 @@
                 });
 
                 if (res.ok) {
-                    alert(`✅ [${targetDateVal}] OMS 데이터 동기화 요청 완료!`);
+                    alert(`✅ [${targetDateVal}] OMS 데이터 동기화 요청 완료! (약 35초 후 캐시 갱신 및 자동으로 그려집니다.)`);
                     setTimeout(async () => { 
                         try {
-                            // 로컬 캐시 초기화
                             const db = await openIndexedDB();
-                            const tx = db.transaction(STORE_NAME, "readwrite");
-                            tx.objectStore(STORE_NAME).clear();
+                            db.transaction(STORE_NAME, "readwrite").objectStore(STORE_NAME).clear();
 
                             await fetch(`${SUPABASE_URL}/rest/v1/rpc/refresh_daily_summary`, {
                                 method: 'POST',
